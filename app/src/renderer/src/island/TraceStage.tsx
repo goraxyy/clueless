@@ -1,23 +1,30 @@
 // While an Animate run plays, the student's own text lights up (a click-through window over the
 // screen): a dashed outline around what they highlighted, a band on the line the current step is
-// about (with a tag for conditions, loops and returns), and an arrow from that line to the visual
-// island, where the picture and the voice are. The pace comes from the island controller.
+// about (with a tag for conditions, loops and returns). The picture and the voice are in the visual
+// island. The pace comes from the island controller.
 import { AnimatePresence, motion } from 'motion/react'
-import { stepCount, type CodeSpot, type IslandView, type Rect } from '../../../shared/contracts'
-import { arrowPath, arrowTo } from '../../../shared/layout'
+import { useEffect, useState } from 'react'
+import { stepCount, type CodeSpot, type IslandView, type Rect, type StageIsland } from '../../../shared/contracts'
 import type { CodeTrace, TraceStep } from '../../../shared/trace'
+import { api } from '../api'
 import { cx } from '../components/ui'
 import { loopPass } from './traceState'
 
-const SPRING = { type: 'spring', stiffness: 200, damping: 28 } as const
 
-export function TraceStage({ view, island }: { view: IslandView; island: Rect | null }) {
-  const { spot, playback } = view
-  if (!spot || !playback || view.spotLost || !stepCount(view)) return null
-  return <Drawing key={playback.nonce} view={view} spot={spot} index={playback.index} island={island} />
+/** The stage window's whole page (#stage): an Animate run's highlight on the student's code. */
+export function StageScreen() {
+  const [show, setShow] = useState<StageIsland | null>(null)
+  useEffect(() => api.onStageIsland(setShow), [])
+  return show?.view ? <TraceStage view={show.view} /> : null
 }
 
-function Drawing({ view, spot, index, island }: { view: IslandView; spot: CodeSpot; index: number; island: Rect | null }) {
+export function TraceStage({ view }: { view: IslandView }) {
+  const { spot, playback } = view
+  if (!spot || !playback || view.spotLost || !stepCount(view)) return null
+  return <Drawing key={playback.nonce} view={view} spot={spot} index={playback.index} />
+}
+
+function Drawing({ view, spot, index }: { view: IslandView; spot: CodeSpot; index: number }) {
   const lh = spot.lineHeight
   if (lh <= 0) return <div className="pointer-events-none fixed inset-0" data-trace-stage /> // where the lines are is unknown
   const area: Rect = { x: spot.left, y: spot.top, width: spot.width, height: spot.lines * lh }
@@ -25,8 +32,6 @@ function Drawing({ view, spot, index, island }: { view: IslandView; spot: CodeSp
   const band = lines ? { y: spot.top + (lines.line - 1) * lh, height: (lines.endLine - lines.line + 1) * lh } : null
   const step = index >= 0 ? view.trace?.steps[index] : undefined
   const badge = step && view.trace ? stepBadge(view.trace, step, index) : null
-  const anchorY = band ? band.y + band.height / 2 : area.y + Math.min(area.height, 40) / 2
-  const arrow = island ? arrowTo(area, anchorY, island) : null
 
   return (
     <div className="pointer-events-none fixed inset-0 overflow-hidden" data-trace-stage>
@@ -42,16 +47,17 @@ function Drawing({ view, spot, index, island }: { view: IslandView; spot: CodeSp
           style={{ left: area.x - 2, width: area.width + 4 }}
           initial={{ opacity: 0, top: band.y, height: band.height }}
           animate={{ opacity: 1, top: band.y, height: band.height }}
-          transition={SPRING}
+          // Quick, so the band is on the right line by the time the visual island shows the step.
+          transition={{ duration: 0.18, ease: 'easeOut' }}
         >
-          <AnimatePresence mode="wait">
+          <AnimatePresence initial={false}>
             {badge && (
               <motion.span
                 key={`${index}:${badge.text}`}
                 initial={{ opacity: 0, x: -6, scale: 0.85 }}
                 animate={{ opacity: 1, x: 0, scale: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ delay: 0.15, type: 'spring', stiffness: 260, damping: 20 }}
+                exit={{ opacity: 0, transition: { duration: 0.08 } }}
+                transition={{ duration: 0.15 }}
                 className={cx('absolute right-1 top-1/2 -translate-y-1/2 whitespace-nowrap rounded-full px-2 py-px text-[12px] font-semibold shadow', badge.tone)}
               >
                 {badge.text}
@@ -59,26 +65,6 @@ function Drawing({ view, spot, index, island }: { view: IslandView; spot: CodeSp
             )}
           </AnimatePresence>
         </motion.div>
-      )}
-      {arrow && (
-        <svg className="absolute inset-0 h-full w-full overflow-visible">
-          <defs>
-            <marker id="trace-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
-              <path d="M0 0L10 5L0 10z" fill="#d97757" />
-            </marker>
-          </defs>
-          <motion.path
-            fill="none"
-            stroke="#d97757"
-            strokeWidth={2.5}
-            strokeLinecap="round"
-            markerEnd="url(#trace-arrow)"
-            style={{ filter: 'drop-shadow(0 1px 2px rgb(0 0 0 / 0.4))' }}
-            initial={{ pathLength: 0, d: arrowPath(arrow.from, arrow.to, arrow.side) }}
-            animate={{ pathLength: 1, d: arrowPath(arrow.from, arrow.to, arrow.side) }}
-            transition={{ pathLength: { duration: 0.5 }, d: SPRING }}
-          />
-        </svg>
       )}
     </div>
   )

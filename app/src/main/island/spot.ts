@@ -140,23 +140,30 @@ function textEdges(gray: Gray, top: number, bottom: number, xa: number, xb: numb
     for (let c = 0; c < gray.width; c++) hist[gray.data[r * gray.width + c]]++
     meds.push(median(hist, gray.width))
   }
-  const colInk = (c: number): boolean => {
-    for (let r = r0; r < r1; r++) if (Math.abs(gray.data[r * gray.width + c] - meds[r - r0]) > INK) return true
-    return false
+  // how many of the rows have ink in column c
+  const colInk = (c: number): number => {
+    let n = 0
+    for (let r = r0; r < r1; r++) if (Math.abs(gray.data[r * gray.width + c] - meds[r - r0]) > INK) n++
+    return n / (r1 - r0)
   }
+  const border = (c: number): boolean => r1 - r0 >= 3 && colInk(c) >= 0.8 // a divider, scrollbar or panel edge
   const ca = Math.max(0, Math.min(gray.width - 1, Math.round(xa - gray.x)))
   const cb = Math.max(0, Math.min(gray.width - 1, Math.round(xb - gray.x)))
-  // walk outwards until a long empty stretch: past it is something else (a gutter, another panel)
+  // Left: the text of the lines (word gaps are under a character), stopping at the first real gap,
+  // so the line numbers in the gutter and the panel beside the editor stay out.
   let left = ca
-  for (let c = ca, empty = 0; c >= 0 && empty < h * 3; c--) {
-    if (colInk(c)) {
+  for (let c = ca, empty = 0; c >= 0 && empty < Math.max(6, h * 0.75); c--) {
+    if (border(c)) break
+    if (colInk(c) > 0) {
       left = c
       empty = 0
     } else empty++
   }
+  // Right: lines end at different places, so allow a wider gap, but never past a divider.
   let right = cb
   for (let c = cb, empty = 0; c < gray.width && empty < h * 4; c++) {
-    if (colInk(c)) {
+    if (border(c)) break
+    if (colInk(c) > 0) {
       right = c
       empty = 0
     } else empty++

@@ -36,6 +36,20 @@ export function supportsServerFallbacks(model: string): boolean {
   return !/haiku/i.test(model)
 }
 
+/** Haiku 4.5 and older models reject the effort setting: they just get the default. */
+export function supportsEffort(model: string): boolean {
+  return !/haiku-4|claude-3/i.test(model)
+}
+
+/** The request's output_config: effort where the model takes it, plus a JSON schema in structured mode.
+ *  undefined = leave it out. */
+export function outputConfig(model: string, effort: string, schema?: Record<string, unknown>): Record<string, unknown> | undefined {
+  const config: Record<string, unknown> = {}
+  if (supportsEffort(model)) config.effort = effort
+  if (schema) config.format = { type: 'json_schema', schema }
+  return Object.keys(config).length ? config : undefined
+}
+
 export function bedrockRegion(env: Env = process.env): string {
   return env.AWS_REGION || env.AWS_DEFAULT_REGION || 'us-east-1'
 }

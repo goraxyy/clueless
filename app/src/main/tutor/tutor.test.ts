@@ -32,7 +32,7 @@ const wireTurn = {
   gap: { type: 'none', topic: '' },
   expects: 'math',
   choices: [],
-  visual: { caption: '', frames: [], focus: [] },
+  visual: { caption: '', frames: [], narration: [] },
   check: { kind: 'antiderivative', reference: 'x^2*e^x', variable: 'x', unit: '' }
 }
 
@@ -261,5 +261,14 @@ describe('provider detection', () => {
     expect(t?.mode).toBe('tool')
     expect(t?.serverFallbacks).toBe(false)
     expect(t?.plainClient).toBeDefined()
+  })
+})
+
+describe('output_config per model', () => {
+  it('leaves effort out for Haiku 4.5, and keeps the schema in structured mode', async () => {
+    const { outputConfig } = await import('./provider')
+    expect(outputConfig('anthropic.claude-haiku-4-5', 'low')).toBeUndefined()
+    expect(outputConfig('claude-haiku-4-5', 'low', { type: 'object' })).toEqual({ format: { type: 'json_schema', schema: { type: 'object' } } })
+    expect(outputConfig('anthropic.claude-sonnet-5', 'low')).toEqual({ effort: 'low' })
   })
 })

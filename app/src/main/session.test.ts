@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { SessionView, TutorReplyT, TutorTurn } from '../shared/contracts'
 import { MemoryStore } from './memory/store'
-import { SessionController, type AreaCapture } from './session'
+import { SessionController } from './session'
 import type { SendInput, StartInput, TutorLike } from './tutor/tutor'
 
 const turn = (over: Partial<TutorTurn> = {}): TutorTurn => ({
@@ -34,19 +34,13 @@ class FakeTutor implements TutorLike {
   }
 }
 
-const SHOT: AreaCapture = {
-  screen: { data: 'SCREEN', mediaType: 'image/jpeg' },
-  crop: { data: 'CROP', mediaType: 'image/jpeg' },
-  area: { displayId: 1, rect: { x: 10, y: 20, width: 300, height: 200 } }
-}
-
 const sudokuVisual = {
   caption: 'boxes',
   frames: [{ type: 'sets' as const, name: 'boxes', bins: [{ label: 'boxes[0]', items: ['5'] }], flash: -1 }],
-  focus: [{ top: 0.1, bottom: 0.2 }]
+  narration: ['The first box gets a 5.']
 }
 
-function setup(area: AreaCapture | null = SHOT) {
+function setup() {
   const tutor = new FakeTutor()
   const views: (SessionView | null)[] = []
   const memory = new MemoryStore(null)
@@ -55,7 +49,6 @@ function setup(area: AreaCapture | null = SHOT) {
     makeTutor: () => tutor,
     memory,
     captureScreen: async () => ({ data: 'AAAA', mediaType: 'image/jpeg' }),
-    captureArea: vi.fn(async () => area),
     emit: (v) => views.push(v),
     stuck
   })
@@ -129,40 +122,50 @@ describe('SessionController', () => {
     expect(memory.view().sessions).toBe(1)
   })
 
-  it('animates the selected code: both images go to the tutor, the turn plays over that area', async () => {
-    const { controller, tutor, last } = setup()
-    await controller.startProblem({ text: 'p' })
-    tutor.replies.push({ problem: null, turn: turn({ message: 'Watch the boxes fill.', visual: sudokuVisual }), recap: null })
-    await controller.action('animate_code')
-    const sent = tutor.sent.at(-1)!
-    expect(sent.tag).toBe('ANIMATE CODE')
-    expect(sent.image?.data).toBe('SCREEN')
-    expect(sent.crop?.data).toBe('CROP')
-    const item = last()!.thread.at(-1)!
-    expect(item.role === 'tutor' && item.turn.animation).toEqual({ target: 'code', area: SHOT.area })
-  })
-
-  it('does nothing when the student cancels the code selection', async () => {
-    const { controller, tutor } = setup(null)
-    await controller.startProblem({ text: 'p' })
-    await controller.action('animate_code')
-    expect(tutor.sent).toHaveLength(0)
-  })
-
-  it('animates the problem or the question inside the panel, and drops the button when it can\'t animate', async () => {
+  it('Animate asks for the idea right now; the reply is marked to play in its own window', async () => {
     const { controller, tutor, last } = setup()
     await controller.startProblem({ text: 'p' })
     tutor.replies.push({ problem: null, turn: turn({ visual: sudokuVisual }), recap: null })
-    await controller.action('animate_problem')
-    expect(tutor.sent.at(-1)?.tag).toBe('ANIMATE PROBLEM')
+    await controller.action('animate')
+    expect(tutor.sent.at(-1)?.tag).toBe('ANIMATE')
     let item = last()!.thread.at(-1)!
-    expect(item.role === 'tutor' && item.turn.animation).toEqual({ target: 'problem', area: null })
+    expect(item.role === 'tutor' && item.turn.animation).toEqual({ requested: true })
 
     tutor.replies.push({ problem: null, turn: turn({ message: "I can't animate this.", visual: null }), recap: null })
-    await controller.action('animate_question')
-    expect(tutor.sent.at(-1)?.tag).toBe('ANIMATE QUESTION')
+    await controller.action('animate')
     item = last()!.thread.at(-1)!
     expect(item.role === 'tutor' && item.turn.animation).toBeNull()
+  })
+
+  it('sends the screen with a typed message, marked [SCREEN]', async () => {
+    const { controller, tutor } = setup()
+    await controller.startProblem({ text: 'p' })
+    await controller.send('what does the problem on my screen ask?', 'text', { data: 'NOW', mediaType: 'image/jpeg' })
+    const sent = tutor.sent.at(-1)!
+    expect(sent.image?.data).toBe('NOW')
+    expect(sent.notes).toContain('[SCREEN]')
+  })
+
+  it('writes the recap by itself once the whole problem is solved', async () => {
+    const { controller, tutor, last } = setup()
+    await controller.startProblem({ text: 'p' })
+    tutor.replies.push({ problem: null, turn: turn({ kind: 'solved', plan: [{ id: 1, text: 'Integrate by parts', status: 'done' }] }), recap: null })
+    tutor.replies.push({
+      problem: null,
+      turn: turn({ kind: 'solved' }),
+      recap: { explainBack: 'Why u = x²?', gaps: [], similarProblem: null }
+    })
+    await controller.send('x^2 e^x - 2x e^x + 2e^x', 'math')
+    expect(tutor.sent.map((s) => s.tag)).toEqual(['STUDENT', 'RECAP'])
+    expect(last()!.recap?.explainBack).toBe('Why u = x²?')
+  })
+
+  it('does not recap when only a step is solved', async () => {
+    const { controller, tutor } = setup()
+    await controller.startProblem({ text: 'p' })
+    tutor.replies.push({ problem: null, turn: turn({ kind: 'solved', plan: [{ id: 1, text: 'a', status: 'done' }, { id: 2, text: 'b', status: 'current' }] }), recap: null })
+    await controller.send('done', 'text')
+    expect(tutor.sent.map((s) => s.tag)).toEqual(['STUDENT'])
   })
 
   it('keeps the error and lets the student retry', async () => {

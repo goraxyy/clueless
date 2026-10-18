@@ -97,7 +97,7 @@ export function useVoiceConversation({
     lastSeen.current = latest.id
     const { enabled, input } = live.current
     const recording = input.state === 'starting' || input.state === 'listening' || input.state === 'finishing'
-    if (enabled && !recording) speech.speak(toSpeech(latest.message))
+    if (enabled && !recording && !latest.animated) speech.speak(toSpeech(latest.message))
   }, [latest?.id, latest?.message])
 
   // The voice hotkey (Ctrl/Cmd+Shift+1).
@@ -118,11 +118,12 @@ export function useVoiceConversation({
   return { enabled, setEnabled, input, speech: snap, processing, talk, toggleMic, readAloud }
 }
 
-function findLastTutor(session: SessionView | null): { id: string; message: string } | null {
+function findLastTutor(session: SessionView | null): { id: string; message: string; animated: boolean } | null {
   if (!session) return null
   for (let i = session.thread.length - 1; i >= 0; i--) {
     const item = session.thread[i]
-    if (item.role === 'tutor') return { id: item.id, message: item.turn.message }
+    // An animated reply is read by the animation window, in step with it.
+    if (item.role === 'tutor') return { id: item.id, message: item.turn.message, animated: Boolean(item.turn.animation && item.turn.visual) }
   }
   return null
 }

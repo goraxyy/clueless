@@ -28,8 +28,6 @@ import {
   type InputKind,
   type Rect,
   type SessionView,
-  type StagePlay,
-  type StageShow,
   type StepIntent,
   type Subject,
   type UserAction,
@@ -37,7 +35,7 @@ import {
   stepCount
 } from '../shared/contracts'
 import { IslandController, type IslandCapture } from '../shared/islandController'
-import { normalizeSnippet } from '../shared/trace'
+import { lessonFromVisual, normalizeSnippet } from '../shared/trace'
 import {
   activeDisplay,
   captureDisplay,
@@ -53,7 +51,7 @@ import { grayFromBitmap, spotFromSelection } from './island/spot'
 import { Tracer } from './island/tracer'
 import { PythonRunner, toCodeTrace } from './run/python'
 import { MemoryStore } from './memory/store'
-import { SessionController, type AreaCapture } from './session'
+import { SessionController } from './session'
 import { StuckDetector } from './stuck/detector'
 import { createTransport, providerInfo } from './tutor/provider'
 import { Tutor, type ImageInput } from './tutor/tutor'
@@ -86,7 +84,6 @@ const SMOKE = process.env.CLUELESS_SMOKE === '1'
 let overlay: BrowserWindow | null = null
 let stage: BrowserWindow | null = null // code-mode animations, drawn over the student's code
 let stageLoaded = false
-let stageShow: StageShow | null = null
 let island: BrowserWindow | null = null
 let askButton: BrowserWindow | null = null
 let visual: BrowserWindow | null = null // the visual island: an Animate run's picture, voice and controls
@@ -186,41 +183,7 @@ async function pickArea(): Promise<{ full: NativeImage | null; rect: Rect; displ
   }
 }
 
-/** "Animate my code": select the code, then capture the whole screen and the close-up. */
-async function captureArea(): Promise<AreaCapture | null> {
-  if (capturing) return null
-  capturing = true
-  try {
-    const picked = await pickArea()
-    showOverlay()
-    if (!picked) return null
-    if (!picked.full) {
-      controller.fail("Couldn't capture your screen. On macOS, allow Screen Recording for Clueless and restart it.")
-      return null
-    }
-    return {
-      screen: toModelImage(picked.full),
-      crop: toModelImage(cropToRect(picked.full, picked.rect, picked.display)),
-      area: { displayId: picked.display.id, rect: picked.rect }
-    }
-  } finally {
-    capturing = false
-  }
-}
-
-// ---------- code-mode animation stage ----------
-
-function isStagePlay(value: unknown): value is StagePlay {
-  const p = value as StagePlay | null
-  const r = p?.area?.rect
-  return Boolean(
-    p &&
-      Array.isArray(p.visual?.frames) &&
-      typeof p.area.displayId === 'number' &&
-      r &&
-      [r.x, r.y, r.width, r.height].every((n) => typeof n === 'number' && Number.isFinite(n))
-  )
-}
+// ---------- the stage: an Animate run's highlight on the code ----------
 
 function displayById(id: number): Display {
   return screen.getAllDisplays().find((d) => d.id === id) ?? activeDisplay()
@@ -240,15 +203,14 @@ function visualOn(display: Display): Rect | null {
 
 function sendStage(): void {
   if (!stage || stage.isDestroyed() || !stageLoaded) return
-  stage.webContents.send(IPC.stageShow, stageShow)
   const display = islandView?.spot ? displayById(islandView.spot.displayId) : null
   stage.webContents.send(IPC.stageIsland, { view: islandView, island: display ? visualOn(display) : null })
 }
 
-/** The stage is up while the tutor plays a visual over the code, or an Animate run highlights the code. */
+/** The stage is up while an Animate run highlights the code. */
 function updateStage(): void {
   const islandDrawing = Boolean(islandView?.playback && islandView.spot && !islandView.spotLost && stepCount(islandView))
-  const display = stageShow ? displayById(stageShow.area.displayId) : islandDrawing ? displayById(islandView!.spot!.displayId) : null
+  const display = islandDrawing ? displayById(islandView!.spot!.displayId) : null
   if (!display) {
     sendStage()
     if (stage && !stage.isDestroyed()) stage.hide()
@@ -269,16 +231,6 @@ function updateStage(): void {
   stage.setBounds(display.bounds)
   sendStage()
   if (!SMOKE && !stage.isVisible()) stage.showInactive()
-}
-
-function playOnScreen(play: StagePlay): void {
-  stageShow = { ...play, avoid: panelOn(displayById(play.area.displayId)) }
-  updateStage()
-}
-
-function stopOnScreen(): void {
-  stageShow = null
-  updateStage()
 }
 
 async function captureScreen(): Promise<ImageInput | null> {
@@ -318,6 +270,31 @@ async function ask(kind: 'screen' | 'area'): Promise<void> {
   }
 }
 
+/** A question typed before any problem: it starts one, with the screen for context. */
+async function askWithText(text: string): Promise<void> {
+  if (capturing) return
+  capturing = true
+  try {
+    loadKeys() // pick up a key added since launch
+    toUi(IPC.status, status())
+    const image = await screenNow()
+    await controller.startProblem(image ? { text, image } : { text })
+  } finally {
+    capturing = false
+  }
+}
+
+/** The screen right now (Clueless hidden), or null without screen access. */
+async function screenNow(): Promise<ImageInput | null> {
+  if (screenAccess() === 'denied') return null
+  try {
+    return await captureScreen()
+  } catch (err) {
+    log(`capture failed: ${(err as Error).message}`)
+    return null
+  }
+}
+
 function openScreenSettings(): void {
   if (process.platform === 'darwin') {
     void shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture')
@@ -342,6 +319,17 @@ const islandController = new IslandController({
     return tutor && fast ? new Tracer({ tutor, fast }, pythonRunner(), log) : null
   },
   capture: captureForIsland,
+  screen: async () => {
+    if (screenAccess() === 'denied') return null
+    try {
+      return await withPanelHidden(async () => {
+        const image = await captureDisplay(islandDisplay)
+        return image ? toModelImage(image) : null
+      })
+    } catch {
+      return null
+    }
+  },
   emit: (view) => {
     const asked = view.phase !== 'idle' && (islandView?.phase ?? 'idle') === 'idle'
     islandView = view
@@ -480,6 +468,10 @@ function showIsland(): void {
   islandDisplay = activeDisplay()
   placePill()
   island.showInactive() // keep the student's app (and its highlight) focused
+}
+
+/** Highlights are watched from launch, pill or not (the Highlight switch turns the buttons off). */
+function watchHighlights(): void {
   try {
     watcher.start()
   } catch (err) {
@@ -488,7 +480,6 @@ function showIsland(): void {
 }
 
 function hideIsland(): void {
-  watcher.stop()
   hideAskButton()
   islandController.close()
   island?.hide()
@@ -497,6 +488,18 @@ function hideIsland(): void {
 function toggleIsland(): void {
   if (island?.isVisible()) hideIsland()
   else showIsland()
+}
+
+/** The tutor's reply to Animate plays in the visual island as soon as it arrives (once per turn). */
+let lastAnimatedTurn: string | null = null
+function playTutorAnimation(view: SessionView | null): void {
+  const item = view?.thread.at(-1)
+  if (!item || item.role !== 'tutor' || item.id === lastAnimatedTurn) return
+  const { visual: v, animation, message } = item.turn
+  if (!animation || !v?.frames.length) return
+  lastAnimatedTurn = item.id
+  if (overlay && !overlay.isDestroyed()) islandDisplay = screen.getDisplayMatching(overlay.getBounds())
+  islandController.playLesson(lessonFromVisual(v, message))
 }
 
 // ---------- wiring ----------
@@ -533,8 +536,10 @@ function setup(): void {
     makeTutor,
     memory: store,
     captureScreen,
-    captureArea,
-    emit: (view: SessionView | null) => toUi(IPC.session, view),
+    emit: (view: SessionView | null) => {
+      toUi(IPC.session, view)
+      playTutorAnimation(view)
+    },
     stuck
   })
 
@@ -557,12 +562,12 @@ function setup(): void {
   ipcMain.on(IPC.ask, (_e, mode: 'screen' | 'area') => void ask(mode === 'area' ? 'area' : 'screen'))
   ipcMain.on(IPC.askText, (_e, text: string) => {
     if (typeof text !== 'string' || !text.trim()) return
-    loadKeys()
-    toUi(IPC.status, status())
-    void controller.startProblem({ text: text.slice(0, 8000) })
+    void askWithText(text.slice(0, 8000))
   })
   ipcMain.on(IPC.send, (_e, arg: { text: string; as: InputKind }) => {
-    if (typeof arg?.text === 'string') void controller.send(arg.text.slice(0, 4000), arg.as)
+    if (typeof arg?.text !== 'string') return
+    // A typed message can be about anything on screen, so the screen goes with it.
+    void screenNow().then((image) => controller.send(arg.text.slice(0, 4000), arg.as, image))
   })
   ipcMain.on(IPC.action, (_e, action: UserAction) => void controller.action(action))
   ipcMain.on(IPC.step, (_e, arg: { id: number; intent: StepIntent }) => {
@@ -585,10 +590,6 @@ function setup(): void {
   ipcMain.on(IPC.openScreenSettings, () => openScreenSettings())
   ipcMain.on(IPC.areaDone, (_e, rect: Rect) => resolveAreaSelection(rect))
   ipcMain.on(IPC.areaCancel, () => resolveAreaSelection(null))
-  ipcMain.on(IPC.stagePlay, (_e, play: unknown) => {
-    if (isStagePlay(play)) playOnScreen(play)
-  })
-  ipcMain.on(IPC.stageStop, () => stopOnScreen())
 
   ipcMain.handle(ISLAND_IPC.getView, () => islandController.current)
   ipcMain.on(ISLAND_IPC.setAskOnHighlight, (_e, on: unknown) => {
@@ -741,6 +742,7 @@ function setup(): void {
   })
   if (!voiceOk) hotkeyErrors.push(`${VOICE_HOTKEY} is taken by another app`)
   if (!globalShortcut.register(ISLAND_HOTKEY, toggleIsland)) hotkeyErrors.push(`${ISLAND_HOTKEY} is taken by another app`)
+  watchHighlights()
   log(`ready. Ask: ${HOTKEYS.ask}  Select area: ${HOTKEYS.area}  Voice: ${VOICE_HOTKEY}  Island: ${ISLAND_HOTKEY}`)
 }
 

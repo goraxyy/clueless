@@ -239,3 +239,48 @@ describe('IslandController', () => {
     expect(last()).toMatchObject({ askOnHighlight: false, speed: 1.5, voice: false, animate: false })
   })
 })
+
+describe('the tutor\'s Animate in the visual island', () => {
+  it('plays a lesson without touching the Ask conversation, and replays it', () => {
+    const views: IslandView[] = []
+    const controller = new IslandController({
+      makeTracer: () => null,
+      capture: async () => ({ image: null, spot: null }),
+      emit: (v) => views.push(v),
+      schedule: () => () => {},
+      now: () => 0
+    })
+    const scene = { type: 'numberline' as const, min: 0, max: 1, marks: [] }
+    controller.playLesson({ text: '', intro: 'Watch the line.', steps: [{ line: null, endLine: null, say: 'Start.', scene }] })
+    const v = views.at(-1)!
+    expect(v).toMatchObject({ phase: 'idle', spot: null, trace: null, playback: { index: -1, playing: true } })
+    expect(v.lesson?.intro).toBe('Watch the line.')
+    controller.stopPlayback()
+    controller.replay()
+    expect(views.at(-1)?.playback).toMatchObject({ index: -1, playing: true })
+  })
+})
+
+describe('follow-ups', () => {
+  it('come with the screen as it is now', async () => {
+    const seen: (string | undefined)[] = []
+    const tracer: TracerLike = {
+      ask: async () => ({ message: 'It sets n.', trace: null, lesson: null }),
+      followUp: async (_text, _animate, image) => {
+        seen.push(image?.data)
+        return { message: 'The title says Valid Palindrome.', trace: null, lesson: null }
+      }
+    }
+    const controller = new IslandController({
+      makeTracer: () => tracer,
+      capture: async () => ({ image: null, spot: null }),
+      screen: async () => ({ data: 'NOW', mediaType: 'image/jpeg' }),
+      emit: () => {},
+      schedule: () => () => {},
+      now: () => 0
+    })
+    await controller.ask('n = 5', false)
+    await controller.followUp("what's the problem on my screen?")
+    expect(seen).toEqual(['NOW'])
+  })
+})

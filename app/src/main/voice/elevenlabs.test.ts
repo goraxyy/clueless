@@ -59,7 +59,13 @@ describe('ElevenLabs', () => {
       () => ({ ELEVENLABS_API_KEY: 'k', ELEVENLABS_VOICE: 'abcdefghij0123456789' }), // an ID: no lookup
       fakeFetch(() => new Response('{"detail":{"status":"quota_exceeded","message":"You have 0 credits left."}}', { status: 400 })).http
     )
-    expect(await broke.speak({ text: 'Hi' })).toMatchObject({ ok: false, message: expect.stringContaining('credits') })
+    expect(await broke.speak({ text: 'Hi' })).toMatchObject({ ok: false, message: expect.stringContaining('run out') })
+    // ElevenLabs sends "out of characters" as a 401 too: not a bad key.
+    const spent = new ElevenLabs(
+      () => ({ ELEVENLABS_API_KEY: 'k', ELEVENLABS_VOICE: 'abcdefghijklmnopqrst' }),
+      fakeFetch(() => new Response('{"detail":{"status":"quota_exceeded","message":"This request exceeds your quota."}}', { status: 401 })).http
+    )
+    expect(await spent.speak({ text: 'Hi' })).toMatchObject({ ok: false, message: expect.stringContaining('run out') })
 
     const missing = new ElevenLabs(() => ({ ELEVENLABS_API_KEY: 'k', ELEVENLABS_VOICE: 'Nobody' }), fakeFetch(() => voices([])).http)
     expect(await missing.speak({ text: 'Hi' })).toMatchObject({ ok: false, message: expect.stringContaining('No ElevenLabs voice called "Nobody"') })

@@ -14,6 +14,7 @@ import type {
 import { z } from 'zod'
 import { fromTraceWire, normalizeSnippet, numberLines, TraceWire, type TraceReply, type TraceWireT } from '../../shared/trace'
 import { errorMessage, TutorError, type ImageInput, type TutorTransport } from '../tutor/tutor'
+import { outputConfig } from '../tutor/provider'
 import type { AskInput, TracerLike } from '../../shared/islandController'
 import { looksLikePython, toCodeTrace, type PythonRunner } from '../run/python'
 import { TRACE_PROMPT } from './prompt'
@@ -154,8 +155,9 @@ class Conversation {
       max_tokens: MAX_TOKENS,
       system: [{ type: 'text', text: structured ? TRACE_PROMPT : TRACE_PROMPT + TOOL_MODE_RULES, cache_control: { type: 'ephemeral' } }],
       messages: this.messages,
-      output_config: structured ? { effort, format: { type: 'json_schema', schema: traceSchema } } : { effort }
+      output_config: outputConfig(this.transport.model, effort, structured ? traceSchema : undefined)
     }
+    if (!params.output_config) delete params.output_config
     if (!structured) {
       params.tools = [REPLY_TOOL]
       params.tool_choice = { type: 'auto' } // forced tool use isn't allowed on Opus 5.5; the prompt asks for it
@@ -233,16 +235,17 @@ export class Tracer implements TracerLike {
     return fromTraceWire(await this.conv.request({ text: `[ANIMATE OFF]\n${highlight}`, images }, 'medium'), this.code)
   }
 
-  async followUp(text: string, animate: boolean): Promise<TraceReply> {
+  async followUp(text: string, animate: boolean, image: ImageInput | null = null): Promise<TraceReply> {
     const conv = this.conv
     if (!conv) throw new TutorError('Ask about a highlight first.', 'api')
+    const images = image ? [image] : []
     if (animate && this.runner && looksLikePython(this.code)) {
-      const wire = await conv.request({ text: `[ANIMATE ON] [RUN] [FOLLOW-UP] ${text}` }, 'low')
+      const wire = await conv.request({ text: `[ANIMATE ON] [RUN] [FOLLOW-UP] ${text}`, images }, 'low')
       const wantsRun = Boolean(wire.run.setup.trim() || wire.run.call.trim())
       return (wantsRun && (await this.runPlan(wire))) || { message: wire.message.trim(), trace: null, lesson: null }
     }
     const effort = animate && conv.transport === this.models.tutor ? this.effortFor(this.code) : 'low'
-    return fromTraceWire(await conv.request({ text: `${animate ? '[ANIMATE ON]' : '[ANIMATE OFF]'} [FOLLOW-UP] ${text}` }, effort), this.code)
+    return fromTraceWire(await conv.request({ text: `${animate ? '[ANIMATE ON]' : '[ANIMATE OFF]'} [FOLLOW-UP] ${text}`, images }, effort), this.code)
   }
 
   /** The tutor model writes the steps itself (any language, or when a run fails). */

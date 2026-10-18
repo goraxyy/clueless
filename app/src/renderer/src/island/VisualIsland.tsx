@@ -18,7 +18,7 @@ import { Figure, type FigureState } from './Figures'
 import { useIslandView } from './IslandScreen'
 import { stepBadge } from './TraceStage'
 import { changesAt, pointersAt, valuesAt } from './traceState'
-import { latestAnswer, useStepNarration } from './useNarration'
+import { introText, useStepNarration } from './useNarration'
 
 export function VisualIsland() {
   const view = useIslandView()
@@ -81,7 +81,7 @@ function title(view: IslandView, index: number): string {
     return (step && view.trace.code.split('\n')[step.line - 1]?.trim()) || 'Your code, step by step'
   }
   const step = view.lesson?.steps[index]
-  return (step?.line && view.lesson?.text.split('\n')[step.line - 1]?.trim()) || 'The idea, step by step'
+  return (step?.line && view.lesson?.text.split('\n')[step.line - 1]?.trim()) || view.lesson?.title || 'The idea, step by step'
 }
 
 /** The code's variables as boxes: what this step changed lights up, what it reads gets an outline. */
@@ -125,7 +125,7 @@ function LessonPicture({ lesson, index }: { lesson: Lesson; index: number }) {
 
 /** What's said at this step (read aloud with voice on). Before step 1: the answer itself. */
 function Said({ view, index }: { view: IslandView; index: number }) {
-  const markdown = index < 0 ? latestAnswer(view) : view.trace ? null : view.lesson?.steps[index]?.say
+  const markdown = index < 0 ? introText(view) : view.trace ? null : view.lesson?.steps[index]?.say
   const plain = index >= 0 && view.trace ? narrateStep(view.trace, index).text : null
   return (
     <AnimatePresence mode="wait">

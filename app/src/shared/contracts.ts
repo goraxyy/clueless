@@ -73,32 +73,9 @@ export type TurnView = Omit<TutorTurn, 'check'> & {
 
 // ---------- animation ----------
 
-/** What the student asked to animate (the Animate button's three options). */
-export type AnimateTarget = 'code' | 'problem' | 'question'
-
-/** A box the student dragged on one display. rect is in DIP, relative to the display's top-left. */
-export interface ScreenArea {
-  displayId: number
-  rect: Rect
-}
-
-/** How a turn's visual plays. 'code' with an area draws over the student's code on screen;
- *  everything else plays inside the panel (explain mode). */
+/** The student asked for this turn with Animate: its visual plays in the visual island window. */
 export interface TurnAnimation {
-  target: AnimateTarget
-  area: ScreenArea | null
-}
-
-/** UI -> main: play a visual over the student's code. `nonce` changes on every replay. */
-export interface StagePlay {
-  visual: Visual
-  area: ScreenArea
-  nonce: number
-}
-
-/** main -> stage window: what to draw. `avoid` is the panel, in the same display coordinates. */
-export interface StageShow extends StagePlay {
-  avoid: Rect | null
+  requested: true
 }
 
 /** main -> stage window: the highlight on the student's code while an Animate run plays
@@ -162,9 +139,8 @@ export type UserAction =
   | 'finish'
   | 'new'
   | 'retry'
-  | 'animate_code'
-  | 'animate_problem'
-  | 'animate_question'
+  | 'animate'
+  | 'example'
 
 /** The student clicked a plan step: stuck on the current one, back to a done one, or "I've done this" on a locked one. */
 export type StepIntent = 'stuck' | 'revisit' | 'claim'
@@ -234,10 +210,7 @@ export const IPC = {
   getStatus: 'app:get-status',
   getSession: 'session:get',
   getMemory: 'memory:get',
-  // Code-mode animation: a click-through window over the student's code
-  stagePlay: 'stage:play', // UI -> main: StagePlay
-  stageStop: 'stage:stop', // UI -> main
-  stageShow: 'stage:show', // main -> stage window: StageShow | null
+  // The click-through window over the student's code, for an Animate run's line highlight
   stageIsland: 'stage:island', // main -> stage window: StageIsland
   // Voice: one recording ("utterance") at a time, identified by an id the UI makes up
   voiceToggle: 'voice:toggle', // main -> UI: the voice hotkey was pressed
@@ -310,9 +283,6 @@ export interface CluelessApi {
   onVoiceState(cb: (e: VoiceStateEvent) => void): () => void
   onVoiceToggle(cb: () => void): () => void
   tts(req: TtsRequest): Promise<TtsResult>
-  playOnScreen(play: StagePlay): void
-  stopOnScreen(): void
-  onStage(cb: (show: StageShow | null) => void): () => void
   onStageIsland(cb: (show: StageIsland) => void): () => void
 }
 

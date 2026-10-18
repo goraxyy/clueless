@@ -313,6 +313,13 @@ export function placeVisualIsland(
   const height = Math.min(Math.ceil(size.height), workArea.height - 16)
   let x = workArea.x + workArea.width - width - 24
   let y = workArea.y + Math.round(workArea.height / 5)
+  if (!spot && avoid) {
+    // The tutor's Animate: beside the panel (left of it if there's room, else right), level with its top.
+    const panel = { x: bounds.x + avoid.x, y: bounds.y + avoid.y, width: avoid.width, height: avoid.height }
+    const left = panel.x - width - 16
+    x = left >= workArea.x ? left : panel.x + panel.width + 16
+    y = panel.y
+  }
   if (spot) {
     const area = spot.lineHeight > 0 ? { x: spot.left, y: spot.top, width: spot.width, height: spot.lines * spot.lineHeight } : { x: spot.left, y: spot.top, width: 1, height: 1 }
     const { card } = placeCard(area, { width, height }, bounds, avoid, area.y + area.height / 2)

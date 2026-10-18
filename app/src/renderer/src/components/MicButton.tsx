@@ -1,6 +1,7 @@
 // The mic button in the answer box. Click to talk; it stops on its own when you pause, or click
 // again to stop now. States: idle, connecting, listening (ring follows your voice), finishing,
 // waiting for the tutor, Clueless speaking (click to interrupt and talk), error.
+import { useState } from 'react'
 import type { VoiceConversation } from '../voice/useVoiceConversation'
 import type { VoiceInput } from '../voice/useVoiceInput'
 import { MicIcon, PauseIcon, PlayIcon, SpeakerIcon, StopIcon } from './icons'
@@ -94,10 +95,16 @@ export function MicButton({ conv, disabled, round = false }: { conv: VoiceConver
 /** While Clueless reads a reply aloud: pause/resume and stop. Also shows playback errors. */
 export function SpeakingStrip({ conv, onStop, onPause, onResume }: { conv: VoiceConversation; onStop: () => void; onPause: () => void; onResume: () => void }) {
   const { state, error } = conv.speech
+  const [dismissed, setDismissed] = useState<string | null>(null) // the warning the student closed
   if (state === 'idle') {
-    if (!error) return null
+    if (!error || error === dismissed) return null
     return (
-      <div className="mb-1.5 rounded-lg bg-zinc-100 px-2.5 py-1.5 text-xs text-zinc-600 dark:bg-white/10 dark:text-zinc-300">{error}</div>
+      <div className="mb-1.5 flex items-start gap-2 rounded-lg bg-zinc-100 px-2.5 py-1.5 text-xs text-zinc-600 dark:bg-white/10 dark:text-zinc-300">
+        <span className="min-w-0 flex-1">{error}</span>
+        <button type="button" onClick={() => setDismissed(error)} className="no-drag shrink-0 opacity-60 hover:opacity-100" title="Dismiss">
+          ✕
+        </button>
+      </div>
     )
   }
   return (

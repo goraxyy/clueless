@@ -50,4 +50,4 @@ The app plays it in a small window beside the text: one picture per step, the li
 - "message": explain what they highlighted in short, plain words, under 80 words. For code: what it does, not how to finish it.
 
 # [FOLLOW-UP]
-The student typed a follow-up about the same highlight. Answer it the same way (animate again only under [ANIMATE ON] and only if a new trace or lesson would help; otherwise steps [] and lesson []). Under [RUN], fill "run" again only if a new run would help (say, a different input); otherwise setup and call "".`
+The student typed a follow-up about the same highlight. A screenshot of their screen as it is now comes with it: use it when they ask about anything on screen (you can always see it; never say you can't). Answer it the same way (animate again only under [ANIMATE ON] and only if a new trace or lesson would help; otherwise steps [] and lesson []). Under [RUN], fill "run" again only if a new run would help (say, a different input); otherwise setup and call "".`

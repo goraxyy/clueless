@@ -161,12 +161,12 @@ function fail(status: number, detail: string): TtsResult {
   } catch {
     // not JSON
   }
-  const message =
-    status === 401
+  // Out of characters comes back as a 401 too, so it's checked first.
+  const message = /quota_exceeded|insufficient.*credits|credits.*(run out|exceeded)/i.test(detail)
+    ? 'Your ElevenLabs characters for this month have run out.'
+    : status === 401
       ? 'ElevenLabs rejected the key. Check ELEVENLABS_API_KEY in your .env file.'
-      : /quota_exceeded|insufficient.*credits|credits.*(run out|exceeded)/i.test(detail)
-        ? 'Your ElevenLabs credits have run out.'
-        : status === 429
+      : status === 429
           ? 'ElevenLabs is busy (too many requests). Try again in a moment.'
           : theirs
             ? `ElevenLabs: ${theirs}`

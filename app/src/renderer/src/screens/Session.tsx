@@ -11,14 +11,11 @@ import type {
   SessionView,
   StepIntent,
   Subject,
-  TurnView,
-  UserAction
+  TurnView
 } from '../../../shared/contracts'
 import { api } from '../api'
 import {
-  BackIcon,
   CheckIcon,
-  ChevronDownIcon,
   FlagIcon,
   LockIcon,
   PlayIcon,
@@ -31,25 +28,18 @@ import {
 import { Markdown, MathText, mathToHtml } from '../components/Markdown'
 import { MicButton, SpeakingStrip, VoiceStrip } from '../components/MicButton'
 import { Button, cx, IconButton } from '../components/ui'
-import { VisualSlot } from '../components/VisualSlot'
 import { speech } from '../voice/speaker'
 import type { VoiceConversation } from '../voice/useVoiceConversation'
 
-export type ComposerMode = 'answer' | 'recall'
-
-/** Voice (`conv`) and the answer box's mode live in the app, so the compact pill can talk too. */
+/** Voice (`conv`) lives in the app, so the compact pill can talk too. */
 export function SessionScreen({
   session,
   onOpenGaps,
-  conv,
-  mode,
-  setMode
+  conv
 }: {
   session: SessionView
   onOpenGaps: () => void
   conv: VoiceConversation
-  mode: ComposerMode
-  setMode: (m: ComposerMode) => void
 }) {
   const ready = Boolean(session.problem) && !session.busy
   const opening = isOpeningQuestion(session)
@@ -60,15 +50,15 @@ export function SessionScreen({
       {session.plan.length > 0 && !opening && <PlanList plan={session.plan} disabled={!ready || Boolean(session.recap)} />}
       <LatestExchange session={session} onOpenGaps={onOpenGaps} onReadAloud={conv.readAloud} />
       {session.stuck.level === 2 && !session.busy && !session.recap && (
-        <StuckBubble reason={session.stuck.reason} onRecall={() => setMode('recall')} />
+        <StuckBubble reason={session.stuck.reason} />
       )}
       {session.error && (
         // Without a problem there's nothing to retry: offer a way back to the start screen instead.
         <ErrorBox message={session.error} canRetry={Boolean(session.problem)} onDismiss={session.problem ? null : () => api.action('new')} />
       )}
-      {session.problem && !session.recap && !opening && <QuickActions session={session} disabled={!ready} />}
+      {session.problem && !session.recap && !opening && <QuickActions disabled={!ready} />}
       {session.problem && (
-        <Composer session={session} mode={mode} setMode={setMode} disabled={!ready} conv={conv} opening={opening} />
+        <Composer session={session} disabled={!ready} conv={conv} opening={opening} />
       )}
     </div>
   )
@@ -76,7 +66,7 @@ export function SessionScreen({
 
 /**
  * Right after a scan Clueless asks "What's tripping you up?" with options. Until the student
- * answers, hints, the plan and the answer-mode toggle don't apply yet, so they're hidden.
+ * answers, hints and the plan don't apply yet, so they're hidden.
  */
 function isOpeningQuestion(session: SessionView): boolean {
   return (
@@ -242,7 +232,7 @@ function LatestExchange({
       {session.busy && <BusyRow label={session.busy} />}
       {tutor && tutor.role === 'tutor' && !pending && (
         <div className={cx('transition-opacity', session.busy && 'opacity-40')}>
-          <TutorCard itemId={tutor.id} turn={tutor.turn} onReadAloud={() => onReadAloud(tutor.turn.message)} />
+          <TutorCard turn={tutor.turn} onReadAloud={() => onReadAloud(tutor.turn.message)} />
           {session.recap && session.recap.afterItemId === tutor.id && (
             <RecapCard recap={session.recap} onOpenGaps={onOpenGaps} />
           )}
@@ -255,7 +245,6 @@ function LatestExchange({
 const KIND_LABEL: Partial<Record<TurnView['kind'], string>> = {
   hint: 'Hint',
   recall_card: 'Quick syntax',
-  side_lesson: 'Side lesson',
   solved: 'Solved'
 }
 
@@ -266,14 +255,12 @@ const GAP_LABEL = {
   careless_slip: 'Careless slip'
 } as const
 
-function TutorCard({ itemId, turn, onReadAloud }: { itemId: string; turn: TurnView; onReadAloud: () => void }) {
+function TutorCard({ turn, onReadAloud }: { turn: TurnView; onReadAloud: () => void }) {
   const label = KIND_LABEL[turn.kind]
   const tone =
     turn.kind === 'recall_card'
       ? 'border-sky-200 bg-sky-50/70 dark:border-sky-900 dark:bg-sky-950/40'
-      : turn.kind === 'side_lesson'
-        ? 'border-violet-200 bg-violet-50/70 dark:border-violet-900 dark:bg-violet-950/40'
-        : turn.kind === 'solved'
+      : turn.kind === 'solved'
           ? 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-900 dark:bg-emerald-950/40'
           : 'border-zinc-900/10 bg-white/70 dark:border-white/10 dark:bg-black/35'
 
@@ -301,7 +288,6 @@ function TutorCard({ itemId, turn, onReadAloud }: { itemId: string; turn: TurnVi
       )}
       <div>
         <Markdown text={turn.message} />
-        <VisualSlot itemId={itemId} turn={turn} />
       </div>
     </div>
   )
@@ -419,7 +405,7 @@ function RecapCard({ recap, onOpenGaps }: { recap: RecapView; onOpenGaps: () => 
 
 // ---------- stuck, errors, actions ----------
 
-function StuckBubble({ reason, onRecall }: { reason: string | null; onRecall: () => void }) {
+function StuckBubble({ reason }: { reason: string | null }) {
   return (
     <div className="mx-3 mb-2 rounded-xl border border-claude-400 bg-claude-50 px-3 py-2 text-[13px] text-zinc-800 shadow-sm dark:border-claude-600/40 dark:bg-claude-600/10 dark:text-zinc-100">
       <div className="mb-1.5">
@@ -427,9 +413,6 @@ function StuckBubble({ reason, onRecall }: { reason: string | null; onRecall: ()
         {reason && <span className="text-zinc-500 dark:text-zinc-400"> Looks like {reason}.</span>}
       </div>
       <div className="flex flex-wrap gap-1.5">
-        <Button variant="chip" onClick={onRecall}>
-          How do I write…
-        </Button>
         <Button variant="chip" onClick={() => api.action('next')}>
           What next?
         </Button>
@@ -459,9 +442,10 @@ function ErrorBox({ message, canRetry, onDismiss }: { message: string; canRetry:
   )
 }
 
-function QuickActions({ session, disabled }: { session: SessionView; disabled: boolean }) {
+/** One row: Hint, What next?, Check my work, Example. The recap comes by itself once it's solved. */
+function QuickActions({ disabled }: { disabled: boolean }) {
   return (
-    <div className="flex flex-wrap justify-between gap-0.5 border-t border-zinc-900/10 px-3 pt-1.5 dark:border-white/10">
+    <div className="flex flex-nowrap justify-between gap-1 border-t border-zinc-900/10 px-3 pt-1.5 dark:border-white/10">
       <Button variant="chip" disabled={disabled} onClick={() => api.action('hint')} title="A slightly bigger hint">
         Hint
       </Button>
@@ -471,22 +455,8 @@ function QuickActions({ session, disabled }: { session: SessionView; disabled: b
       <Button variant="chip" disabled={disabled} onClick={() => api.action('check_my_work')} title="Clueless looks at your screen again">
         Check my work
       </Button>
-      <Button
-        variant="chip"
-        disabled={disabled || !session.revealAllowed}
-        onClick={() => api.action('reveal')}
-        title={session.revealAllowed ? 'Show the full solution (logged)' : `Unlocks after ${3 - Math.min(3, session.attempts)} more tries`}
-      >
-        {!session.revealAllowed && <LockIcon size={11} />} Reveal
-      </Button>
-      <Button
-        variant="chip"
-        disabled={disabled}
-        onClick={() => api.action('finish')}
-        className={cx(session.solved && 'border-claude-500 bg-claude-500 text-white hover:bg-claude-400 dark:bg-claude-500 dark:text-white')}
-        title="Finish and get your recap"
-      >
-        Finish
+      <Button variant="chip" disabled={disabled} onClick={() => api.action('example')} title="A similar worked example, with different numbers">
+        Example
       </Button>
     </div>
   )
@@ -496,27 +466,23 @@ function QuickActions({ session, disabled }: { session: SessionView; disabled: b
 
 function Composer({
   session,
-  mode,
-  setMode,
   disabled,
   conv,
   opening
 }: {
   session: SessionView
-  mode: ComposerMode
-  setMode: (m: ComposerMode) => void
   disabled: boolean
   conv: VoiceConversation
   opening: boolean
 }) {
   const [text, setText] = useState('')
   const input = useRef<HTMLTextAreaElement>(null)
-  const as: InputKind =
-    mode === 'recall' ? 'recall' : session.expects === 'math' ? 'math' : session.expects === 'code' ? 'code' : 'text'
+  // One box for everything: answers, and questions like "how do I write a set?" (Clueless answers those directly).
+  const as: InputKind = session.expects === 'math' ? 'math' : session.expects === 'code' ? 'code' : 'text'
 
   useEffect(() => {
     if (!disabled) input.current?.focus()
-  }, [disabled, mode, session.thread.length])
+  }, [disabled, session.thread.length])
 
   // Grow with the text (up to max-h), so the panel stays small for one-line answers.
   useEffect(() => {
@@ -530,7 +496,6 @@ function Composer({
     if (!value.trim() || disabled) return
     api.send({ text: value, as })
     setText('')
-    setMode('answer')
   }
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -545,13 +510,11 @@ function Composer({
   const choices = openChoices(session)
   const placeholder = opening
     ? 'Something else? Type it here…'
-    : mode === 'recall'
-      ? 'What did you forget? e.g. "how to make a list of 9 sets"'
-      : as === 'math'
-        ? 'Type your answer, e.g. x^2 e^x - 2x e^x + 2e^x + C'
-        : as === 'code'
-          ? 'Paste or type code (⌘/Ctrl + Enter to send)'
-          : 'Your answer or question…'
+    : as === 'math'
+      ? 'Type your answer, e.g. x^2 e^x - 2x e^x + 2e^x + C'
+      : as === 'code'
+        ? 'Paste or type code (⌘/Ctrl + Enter to send)'
+        : 'Your answer, or ask anything…'
 
   return (
     <div className="px-3 pb-2.5 pt-1.5">
@@ -565,8 +528,7 @@ function Composer({
           ))}
         </div>
       ) : (
-        choices.length > 0 &&
-        mode === 'answer' && (
+        choices.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-1.5">
             {choices.map((c) => (
               <Button key={c} variant="chip" disabled={disabled} onClick={() => submit(c)}>
@@ -575,47 +537,6 @@ function Composer({
             ))}
           </div>
         )
-      )}
-      {!opening && (
-        <div className="mb-1 flex items-center gap-1 text-[10.5px]">
-          {(['answer', 'recall'] as const).map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => setMode(m)}
-              className={cx(
-                'no-drag whitespace-nowrap rounded-full px-2 py-0.5 transition-colors',
-                mode === m
-                  ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
-                  : 'text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-white/10'
-              )}
-            >
-              {m === 'answer' ? 'Answer' : 'How do I write…?'}
-            </button>
-          ))}
-          {mode === 'recall' ? (
-            <IconButton title="Back to answering" onClick={() => setMode('answer')} className="h-5 w-5">
-              <BackIcon size={12} />
-            </IconButton>
-          ) : (
-            <AnimateMenu disabled={disabled} />
-          )}
-          <button
-            type="button"
-            onClick={() => conv.setEnabled(!conv.enabled)}
-            aria-pressed={conv.enabled}
-            title={conv.enabled ? 'Voice on: replies are read aloud. Click to turn off' : 'Voice off. Click to have replies read aloud'}
-            className={cx(
-              'no-drag ml-auto flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 transition-colors',
-              conv.enabled
-                ? 'bg-claude-100 text-claude-800 dark:bg-claude-500/15 dark:text-claude-400'
-                : 'text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-white/10'
-            )}
-          >
-            {conv.enabled ? <SpeakerIcon size={11} /> : <SpeakerOffIcon size={11} />}
-            Voice {conv.enabled ? 'on' : 'off'}
-          </button>
-        </div>
       )}
       <SpeakingStrip conv={conv} onStop={speech.stop} onPause={speech.pause} onResume={speech.resume} />
       <VoiceStrip voice={conv.input} onDismiss={conv.input.cancel} />
@@ -634,6 +555,22 @@ function Composer({
             as === 'code' && 'font-mono text-[12.5px]'
           )}
         />
+        <IconButton
+          title={conv.enabled ? 'Voice on: replies are read aloud. Click to turn off' : 'Voice off. Click to have replies read aloud'}
+          aria-pressed={conv.enabled}
+          onClick={() => conv.setEnabled(!conv.enabled)}
+          className={cx(conv.enabled && 'text-claude-600 dark:text-claude-400')}
+        >
+          {conv.enabled ? <SpeakerIcon size={15} /> : <SpeakerOffIcon size={15} />}
+        </IconButton>
+        <IconButton
+          title="Animate: the idea at this step, with voice, in its own window"
+          disabled={disabled}
+          onClick={() => api.action('animate')}
+          className="text-claude-500 disabled:opacity-40 dark:text-claude-400"
+        >
+          <PlayIcon size={14} />
+        </IconButton>
         <MicButton conv={conv} disabled={disabled} />
         <IconButton
           title="Send"
@@ -653,76 +590,3 @@ function Composer({
   )
 }
 
-// ---------- animate button ----------
-
-const ANIMATE_MORE: { action: UserAction; label: string; title: string }[] = [
-  { action: 'animate_problem', label: 'Animate the problem', title: "Watch the problem's example fill in, step by step" },
-  { action: 'animate_question', label: 'Animate the question', title: 'See the idea behind the current question' }
-]
-
-/** "Animate my code ▾": the student always chooses when to animate; Clueless never starts one itself. */
-function AnimateMenu({ disabled }: { disabled: boolean }) {
-  const [open, setOpen] = useState(false)
-  const box = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent): void => {
-      if (!box.current?.contains(e.target as Node)) setOpen(false)
-    }
-    window.addEventListener('mousedown', onDown)
-    return () => window.removeEventListener('mousedown', onDown)
-  }, [open])
-
-  const run = (action: UserAction): void => {
-    setOpen(false)
-    api.action(action)
-  }
-
-  const part =
-    'no-drag flex h-6 items-center whitespace-nowrap border border-zinc-900/10 bg-white/70 text-zinc-700 transition-colors hover:border-claude-500 hover:text-zinc-950 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/15 dark:bg-black/40 dark:text-zinc-200 dark:hover:border-claude-500 dark:hover:text-white'
-
-  return (
-    <div ref={box} className="relative ml-1 flex">
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => run('animate_code')}
-        title="Animate my code: drag a box around your code, then watch it run"
-        className={cx(part, 'gap-1 rounded-l-full pl-2 pr-1.5')}
-      >
-        <PlayIcon size={10} className="text-claude-500" /> Animate
-      </button>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => setOpen(!open)}
-        title="More ways to animate"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className={cx(part, '-ml-px rounded-r-full px-1')}
-      >
-        <ChevronDownIcon size={12} />
-      </button>
-      {open && (
-        <div
-          role="menu"
-          className="absolute bottom-full right-0 z-20 mb-1 w-48 overflow-hidden rounded-lg border border-zinc-900/10 bg-white py-1 shadow-lg dark:border-white/15 dark:bg-zinc-900"
-        >
-          {ANIMATE_MORE.map((item) => (
-            <button
-              key={item.action}
-              type="button"
-              role="menuitem"
-              title={item.title}
-              onClick={() => run(item.action)}
-              className="no-drag flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12.5px] text-zinc-700 hover:bg-claude-50 dark:text-zinc-200 dark:hover:bg-white/10"
-            >
-              <PlayIcon size={10} className="text-claude-500" /> {item.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}

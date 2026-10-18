@@ -37,6 +37,17 @@ describe('spotFromSelection', () => {
     expect(Math.abs(spot.left + spot.width - (520 + 6))).toBeLessThanOrEqual(2)
   })
 
+  it('keeps the line numbers and the panel beside the editor out of the highlight', () => {
+    const gray = editor({ top: 100, lineHeight: 24, lines: CODE })
+    for (let y = 100; y < 100 + 5 * 24; y++) {
+      for (let x = 70; x < 92; x++) if ((x + y) % 3 === 0 && (y - 100) % 24 > 6 && (y - 100) % 24 < 18) gray.data[y * gray.width + x] = 150 // line numbers
+      gray.data[y * gray.width + 50] = 120 // the editor's left edge
+      for (let x = 0; x < 45; x++) if ((x * 5 + y) % 4 === 0) gray.data[y * gray.width + x] = 220 // the problem text beside it
+    }
+    const spot = spotFromSelection({ x: 121, y: 112 }, { x: 330, y: 100 + 4 * 24 + 12 }, 5, 1, gray)
+    expect(Math.abs(spot.left - (120 - 6))).toBeLessThanOrEqual(2)
+  })
+
   it('works on a light theme with the selection colored in', () => {
     const gray = editor({ top: 60, lineHeight: 20, lines: CODE, background: 250, selection: 205, text: 25 })
     const spot = spotFromSelection({ x: 121, y: 60 + 3 }, { x: 330, y: 60 + 4 * 20 + 3 }, 5, 1, gray)

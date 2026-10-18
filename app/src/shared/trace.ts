@@ -101,10 +101,27 @@ export interface LessonStep {
   scene: z.infer<typeof Scene>
 }
 
-/** A concept animation: Animate on something that isn't code. */
+/** A concept animation: Animate on something that isn't code, or the tutor's Animate. */
 export interface Lesson {
   text: string // the highlighted text, normalized; step line numbers point into it
   steps: LessonStep[]
+  title?: string // the top bar (default: "The idea, step by step")
+  intro?: string // said before step 1 (default: the latest Ask answer)
+}
+
+/** The tutor's Animate reply as a lesson for the visual island: one step per frame. */
+export function lessonFromVisual(visual: { caption: string; frames: z.infer<typeof Scene>[]; narration: string[] }, message: string): Lesson {
+  return {
+    text: '',
+    title: visual.caption || undefined,
+    intro: message,
+    steps: visual.frames.slice(0, MAX_LESSON_STEPS).map((scene, i) => ({
+      line: null,
+      endLine: null,
+      say: visual.narration[i]?.trim() || (i === 0 ? visual.caption : ''),
+      scene
+    }))
+  }
 }
 
 export interface TraceReply {

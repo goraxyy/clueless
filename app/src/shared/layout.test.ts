@@ -39,7 +39,17 @@ describe('arrowTo', () => {
     expect(arrowTo(area, 250, { x: 600, y: 100, width: 300, height: 400 })).toEqual({
       from: { x: 500, y: 250 },
       to: { x: 600, y: 250 },
-      side: 'right'
+      side: 'right',
+      exit: 1
+    })
+  })
+  it('starts at the running line even when the card is below the code', () => {
+    // The card's center is left of the code's middle: out from the line's left end, into the card's top.
+    expect(arrowTo(area, 260, { x: 50, y: 450, width: 300, height: 100 })).toEqual({
+      from: { x: 100, y: 260 },
+      to: { x: 200, y: 450 },
+      side: 'below',
+      exit: -1
     })
   })
   it('stays on the card when the line is above it, and works on the left and below', () => {

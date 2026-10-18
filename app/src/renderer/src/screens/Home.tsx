@@ -118,14 +118,19 @@ export function CompactBar({
         className="no-drag h-[34px] min-w-0 flex-1 rounded-full border border-zinc-900/10 bg-white/55 px-3 text-[13.5px] text-zinc-900 outline-none transition-colors placeholder:text-zinc-400 focus:border-claude-400/70 dark:border-white/15 dark:bg-white/[0.06] dark:text-zinc-50 dark:placeholder:text-zinc-500"
       />
       <MicButton conv={conv} disabled={busy} round />
-      <HeaderButton
+      <button
+        type="button"
         title={conv.enabled ? 'Clueless reads its replies aloud. Click to mute' : 'Have Clueless read its replies aloud'}
         aria-pressed={conv.enabled}
         onClick={() => conv.setEnabled(!conv.enabled)}
-        className={conv.enabled ? 'text-claude-500 dark:text-claude-400' : undefined}
+        className={cx(
+          // same circle as the mic next to it
+          'no-drag relative flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border border-zinc-900/10 bg-zinc-900/5 transition-colors hover:bg-zinc-900/10 dark:border-white/15 dark:bg-white/5 dark:hover:bg-white/10',
+          conv.enabled ? 'text-claude-500 dark:text-claude-400' : 'text-zinc-400 dark:text-zinc-500'
+        )}
       >
-        {conv.enabled ? <SpeakerIcon size={16} /> : <SpeakerOffIcon size={16} />}
-      </HeaderButton>
+        {conv.enabled ? <SpeakerIcon size={17} /> : <SpeakerOffIcon size={17} />}
+      </button>
       <HeaderButton title="Expand" onClick={onExpand}>
         <ExpandIcon size={14} />
       </HeaderButton>
@@ -142,24 +147,34 @@ function SettingsButton({ open, onClick }: { open: boolean; onClick: () => void 
   )
 }
 
-/** Settings, right under the top bar (the window grows to fit): transparency, a new session, quit. */
+/**
+ * Settings: transparency, a new session, quit. A card of its own that slides down: under the small
+ * window (which keeps its shape), or over the big window's content, under its top bar.
+ */
 export function SettingsMenu({
   glass,
   onGlass,
   onNewSession,
-  onClose
+  onClose,
+  overContent
 }: {
   glass: Glass
   onGlass: (g: Glass) => void
   onNewSession: () => void
   onClose: () => void
+  overContent: boolean // the big window: float over its content instead of below the bar
 }) {
   const row =
     'no-drag flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] text-zinc-700 hover:bg-zinc-900/5 dark:text-zinc-200 dark:hover:bg-white/10'
   return (
     <>
       <div className="no-drag fixed inset-0 z-10" onClick={onClose} />
-      <div className="relative z-20 border-b border-zinc-900/10 p-1 dark:border-white/10">
+      <div
+        className={cx(
+          'sheet-in glass-panel z-20 rounded-2xl p-1 shadow-xl',
+          overContent ? 'absolute right-2 top-[46px] w-56' : 'relative mt-1.5'
+        )}
+      >
         <button type="button" onClick={() => onGlass(NEXT_GLASS[glass])} className={row} title="Click to change how see-through the panel is">
           <LayersIcon size={14} className="shrink-0 text-zinc-500 dark:text-zinc-400" />
           Transparency

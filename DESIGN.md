@@ -23,15 +23,18 @@ of that gap. Clueless is that hint-giving version, and it works on whatever is o
 ## How it works
 
 1. You press `Cmd/Ctrl + Shift + Space` (or select an area, or paste the problem).
-2. Clueless reads the screen and asks what's tripping you up.
+2. Clueless reads the screen and asks what's tripping you up, with 3 options to pick from.
 3. It breaks the problem into 3–6 steps and shows only the current one. You can click a step if you're stuck on it.
-4. You answer by typing or talking. It checks your answer. If you're wrong, it gives a slightly bigger hint.
-5. When you're done: a short recap, plus the gaps it noticed, saved for next time.
+4. You answer or ask by typing or talking, all in one box. It checks your answer. If you're wrong, it gives a slightly bigger hint.
+5. One row of buttons under the reply: **Hint**, **What next?**, **Check my work** and **Animate** (the idea
+   at this step, played with a voice in the visual island).
+6. Once the whole problem is solved, a short recap comes by itself, plus the gaps it noticed, saved for next time.
 
 The panel shows only your latest message and the latest reply.
 
-**The island** (`Cmd/Ctrl + Shift + 3`) is a second, quicker way in. It's a small pill with one
-switch, **Highlight**: while it's on, highlighting anything brings up two buttons next to the cursor.
+**Highlights** are a second, quicker way in: highlight anything, in any app, and two buttons appear
+next to the cursor. The **Highlight** switch (in settings, or on the pill, `Cmd/Ctrl + Shift + 3`)
+turns them off.
 - **Ask**: the answer shows in the panel.
 - **Animate**: the answer is explained step by step in the **visual island**, a small window of its
   own beside your text, with a voice in step with the picture. Code runs for real and its variables
@@ -46,7 +49,7 @@ the mic talks, the speaker turns spoken replies on or off, and settings are on t
 
 ## Rules the tutor follows
 
-1. No final answers or full solutions. **Reveal** unlocks after 3 real tries, gets logged, and asks you to explain it back.
+1. No final answers or full solutions.
 2. One question at a time.
 3. When you're wrong, it asks you to check (trace the code, take the derivative, try an extreme case) instead of pointing at the mistake.
 4. Forgotten syntax or formulas get answered directly; that isn't the lesson.
@@ -99,8 +102,9 @@ turns cheap.
 differentiating, and compares units.
 
 **Animations.**
-- Panel animations come from the tutor's reply as a small list of scenes (arrays, grids, sets, maps,
-  plots, vectors, trees, graphs), drawn with React and Motion.
+- The tutor's Animate comes back as a small list of scenes (arrays, grids, sets, maps, plots,
+  vectors, trees, graphs) with one spoken line each, drawn with React and Motion in the visual
+  island. Nothing animates inside the panel.
 - Animate on Python code runs it for real. Haiku picks a small input and how to call the code;
   Pyodide (Python in WebAssembly, in a worker thread, with a step and time limit) runs it, and every
   line and value change becomes a step. Other languages, or a run that won't start: Claude writes

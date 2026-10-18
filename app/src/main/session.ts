@@ -6,7 +6,6 @@ import type {
   InputKind,
   PlanStep,
   ProblemInfo,
-  ScreenArea,
   SessionView,
   StepIntent,
   StuckState,
@@ -33,21 +32,12 @@ const FALLBACK_PROBLEM: ProblemInfo = {
   hiddenSolution: ''
 }
 
-/** "Animate my code": the student dragged a box around their code. */
-export interface AreaCapture {
-  screen: ImageInput // the whole display, for context
-  crop: ImageInput // just the selected area
-  area: ScreenArea
-}
-
 export interface ControllerDeps {
   /** A fresh tutor for a new problem, or null when there's no API key. */
   makeTutor(): TutorLike | null
   memory: MemoryStore
   /** Capture the screen for "Check my work". */
   captureScreen(): Promise<ImageInput | null>
-  /** Let the student drag a box around their code and capture it. null = cancelled. */
-  captureArea(): Promise<AreaCapture | null>
   emit(view: SessionView | null): void
   stuck: {
     start(): Promise<void> | void
@@ -105,7 +95,8 @@ export class SessionController {
     })
   }
 
-  send(text: string, as: InputKind): Promise<void> {
+  /** `image`: the screen right now, so a typed question can be about what's on it. */
+  send(text: string, as: InputKind, image: ImageInput | null = null): Promise<void> {
     return this.enqueue(async () => {
       const view = this.view
       if (!view || !this.tutor || !text.trim()) return
@@ -118,7 +109,8 @@ export class SessionController {
 
       const notes = this.takeNotes()
       if (result) notes.push(`[CHECKER] ${result.detail}`)
-      const input: SendInput = { tag: as === 'recall' ? 'RECALL' : 'STUDENT', text, notes }
+      if (image) notes.push('[SCREEN]')
+      const input: SendInput = { tag: as === 'recall' ? 'RECALL' : 'STUDENT', text, notes, ...(image ? { image } : {}) }
       await this.attempt(() => this.round(input))
     })
   }
@@ -169,26 +161,12 @@ export class SessionController {
           return this.attempt(() => this.round({ tag: 'REVEAL', notes: this.takeNotes() }))
         case 'finish':
           return this.attempt(() => this.round({ tag: 'RECAP', notes: this.takeNotes() }, 'Writing your recap…'))
-        case 'animate_code': {
-          const shot = await this.deps.captureArea()
-          if (!shot) return // the student cancelled the selection
-          const animation: TurnAnimation = { target: 'code', area: shot.area }
+        case 'example':
+          return this.attempt(() => this.round({ tag: 'EXAMPLE', notes: this.takeNotes() }, 'Finding a similar example…'))
+        case 'animate':
           return this.attempt(() =>
-            this.round(
-              { tag: 'ANIMATE CODE', image: shot.screen, crop: shot.crop, notes: this.takeNotes() },
-              'Getting the animation ready…',
-              animation
-            )
+            this.round({ tag: 'ANIMATE', notes: this.takeNotes() }, 'Getting the animation ready…', { requested: true })
           )
-        }
-        case 'animate_problem':
-        case 'animate_question': {
-          const target = action === 'animate_problem' ? 'problem' : 'question'
-          const tag = action === 'animate_problem' ? 'ANIMATE PROBLEM' : 'ANIMATE QUESTION'
-          return this.attempt(() =>
-            this.round({ tag, notes: this.takeNotes() }, 'Getting the animation ready…', { target, area: null })
-          )
-        }
       }
     })
   }
@@ -243,7 +221,12 @@ export class SessionController {
     const tutor = this.tutor
     if (!tutor) return
     const reply = await this.call(busy, () => tutor.send(input))
-    if (reply) this.applyReply(reply, animation)
+    if (!reply) return
+    this.applyReply(reply, animation)
+    // The whole problem is solved (every plan step done): the recap follows by itself.
+    if (input.tag !== 'RECAP' && reply.turn.kind === 'solved' && !this.view?.recap && this.plan.length > 0 && this.plan.every((s) => s.status === 'done')) {
+      await this.round({ tag: 'RECAP', notes: this.takeNotes() }, 'Writing your recap…')
+    }
   }
 
   private async attempt(run: () => Promise<void>): Promise<void> {

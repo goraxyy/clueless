@@ -13,9 +13,14 @@ import { islandApi } from './api'
 
 /** What step `index` says: the trace's own line, or the lesson's. index -1 = the answer. */
 export function stepSpeech(view: IslandView, index: number): string {
-  if (index < 0) return toSpeech(latestAnswer(view) ?? '')
+  if (index < 0) return toSpeech(introText(view) ?? '')
   if (view.trace) return narrateStep(view.trace, index).speech
   return toSpeech(view.lesson?.steps[index]?.say ?? '')
+}
+
+/** Said before step 1: the tutor's Animate reply, or the Ask answer. */
+export function introText(view: IslandView): string | null {
+  return view.lesson?.intro ?? latestAnswer(view)
 }
 
 export function latestAnswer(view: IslandView | null): string | null {

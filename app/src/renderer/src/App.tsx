@@ -1,5 +1,5 @@
 import { MotionConfig } from 'motion/react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { AppStatus, SessionView, WindowMode } from '../../shared/contracts'
 import { api } from './api'
 import { islandApi } from './island/api'
@@ -10,12 +10,10 @@ import { VisualIsland } from './island/VisualIsland'
 import { AreaSelector } from './screens/AreaSelector'
 import { Banners, CompactBar, EmptyState, GLASS_ALPHA, Header, SettingsMenu, type Glass } from './screens/Home'
 import { GapsScreen } from './screens/Gaps'
-import { SessionScreen, type ComposerMode } from './screens/Session'
+import { SessionScreen } from './screens/Session'
 import { VoiceStrip } from './components/MicButton'
 import { useVoiceConversation } from './voice/useVoiceConversation'
-import { AnimationPane } from './visuals/AnimationPane'
-import { StageScreen } from './visuals/CodeOverlay'
-import { PlaybackContext, playsOnCode, type Playback, type Playing } from './visuals/playback'
+import { StageScreen } from './island/TraceStage'
 import { speech } from './voice/speaker'
 import { toSpeech } from '../../shared/speechText'
 
@@ -41,10 +39,9 @@ export function App() {
   )
 }
 
-/** The window size for this state: wide while an explain-mode animation is open. */
-function windowMode(compact: boolean, playing: Playing | null): WindowMode {
-  if (compact) return 'compact'
-  return playing && !playsOnCode(playing.animation) ? 'wide' : 'expanded'
+/** The window size for this state. Animations play in their own window, never in the panel. */
+function windowMode(compact: boolean): WindowMode {
+  return compact ? 'compact' : 'expanded'
 }
 
 function Overlay() {
@@ -54,7 +51,6 @@ function Overlay() {
   const [compact, setCompact] = useState(false)
   const [glass, setGlass] = useState<Glass>(loadGlass)
   const [size, setSize] = useState<PanelSize>(loadSize)
-  const [playing, setPlaying] = useState<Playing | null>(null)
   const [menu, setMenu] = useState(false)
   const islandView = useIslandView()
   const asking = Boolean(islandView && islandView.phase !== 'idle')
@@ -76,44 +72,11 @@ function Overlay() {
     }
   }, [])
 
-  const playback = useMemo<Playback>(
-    () => ({
-      playing,
-      play(itemId, turn) {
-        if (!turn.visual) return
-        const next: Playing = { itemId, visual: turn.visual, message: turn.message, animation: turn.animation, nonce: Date.now() }
-        if (playsOnCode(next.animation)) api.playOnScreen({ visual: next.visual, area: next.animation!.area!, nonce: next.nonce })
-        else if (playing && playsOnCode(playing.animation)) api.stopOnScreen()
-        api.setWindowMode(windowMode(compact, next))
-        setPlaying(next)
-      },
-      replay() {
-        if (!playing) return
-        const next = { ...playing, nonce: playing.nonce + 1 }
-        if (playsOnCode(next.animation)) api.playOnScreen({ visual: next.visual, area: next.animation!.area!, nonce: next.nonce })
-        setPlaying(next)
-      },
-      stop() {
-        if (!playing) return
-        if (playsOnCode(playing.animation)) api.stopOnScreen()
-        api.setWindowMode(windowMode(compact, null))
-        setPlaying(null)
-      }
-    }),
-    [playing, compact]
-  )
-  const stopPlayback = useRef(playback.stop)
-  stopPlayback.current = playback.stop
-  const playingRef = useRef(playing)
-  playingRef.current = playing
-
-  // A new problem (or none): close any animation, back to the main screen, full size.
+  // A new problem: back to the main screen, full size.
   useEffect(() => {
-    stopPlayback.current()
     if (!session?.id) return
     setScreen('main')
     setCompactMode(false)
-    setMode('answer')
   }, [session?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // A new Ask: its answer shows here, so open the panel up.
@@ -121,13 +84,13 @@ function Overlay() {
     if (!asking) return
     setScreen('main')
     setCompact(false)
-    api.setWindowMode(windowMode(false, playingRef.current))
+    api.setWindowMode(windowMode(false))
   }, [asking])
 
   // The panel and its window always change size together (the pill has a smaller window).
   const setCompactMode = (next: boolean): void => {
     setCompact(next)
-    api.setWindowMode(windowMode(next, playing))
+    api.setWindowMode(windowMode(next))
   }
   const toggleCompact = (): void => {
     setMenu(false)
@@ -154,14 +117,12 @@ function Overlay() {
 
   // Voice lives here, not in the session screen, so the compact pill can talk too.
   // What you say is sent exactly like a typed answer; with no problem yet, it becomes the problem.
-  const [mode, setMode] = useState<ComposerMode>('answer')
   const conv = useVoiceConversation({
     session,
     disabled: Boolean(session?.busy),
     onSpoken: (text) => {
       if (session?.problem) {
-        api.send({ text, as: mode === 'recall' ? 'recall' : 'text' })
-        setMode('answer')
+        api.send({ text, as: 'text' })
       } else {
         api.askText(text)
       }
@@ -169,10 +130,12 @@ function Overlay() {
     }
   })
 
-  // The window is exactly as tall as the panel: small when there's little to show.
+  // The window is exactly as tall as the panel (plus the settings card under the small window):
+  // small when there's little to show.
   const panel = useRef<HTMLDivElement>(null)
+  const stack = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    const el = panel.current
+    const el = stack.current
     if (!el) return
     let frame = 0
     const observer = new ResizeObserver(() => {
@@ -210,12 +173,9 @@ function Overlay() {
     }
   }
 
-  const explain = playing && !playsOnCode(playing.animation) ? playing : null
-  const onCode = Boolean(playing && playsOnCode(playing.animation))
-
   return (
-    <PlaybackContext.Provider value={playback}>
     <div className="relative p-2" data-app-ready>
+      <div ref={stack} className="flex flex-col">
       <div
         ref={panel}
         className={
@@ -224,8 +184,6 @@ function Overlay() {
           'glass-panel relative flex flex-col overflow-clip text-zinc-900 shadow-xl dark:text-zinc-100 ' +
           (compact ? 'rounded-[26px] ' : 'rounded-2xl ') +
           (glass === 'clear' ? 'glass-clear ' : '') +
-          // Code mode: the panel turns see-through so the animation on the code is the focus.
-          (onCode ? 'opacity-40 transition-opacity duration-300 hover:opacity-100 ' : '') +
           'w-full'
         }
         style={
@@ -264,13 +222,13 @@ function Overlay() {
             }}
           />
         )}
-        {menu && <SettingsMenu glass={glass} onGlass={changeGlass} onNewSession={newSession} onClose={() => setMenu(false)} />}
+        {menu && !compact && (
+          <SettingsMenu glass={glass} onGlass={changeGlass} onNewSession={newSession} onClose={() => setMenu(false)} overContent />
+        )}
         {!compact && (
           <>
             <Banners status={status} />
-            {/* Explain mode: the animation pane sits to the left of the conversation. */}
             <div className="panel-body">
-              {explain && <AnimationPane playing={explain} onReplay={playback.replay} onClose={playback.stop} />}
               <div className="panel-main">
                 {screen === 'gaps' ? (
                   <GapsScreen onBack={() => setScreen('main')} />
@@ -281,8 +239,6 @@ function Overlay() {
                     session={session}
                     onOpenGaps={() => setScreen('gaps')}
                     conv={conv}
-                    mode={mode}
-                    setMode={setMode}
                   />
                 ) : (
                   <EmptyState status={status} />
@@ -292,9 +248,13 @@ function Overlay() {
           </>
         )}
       </div>
+      {/* The small window keeps its shape: settings slide down as a card of their own under it. */}
+      {menu && compact && (
+        <SettingsMenu glass={glass} onGlass={changeGlass} onNewSession={newSession} onClose={() => setMenu(false)} overContent={false} />
+      )}
+      </div>
       {!compact && <ResizeGrips panel={panel} size={size} onSize={changeSize} />}
     </div>
-    </PlaybackContext.Provider>
   )
 }
 

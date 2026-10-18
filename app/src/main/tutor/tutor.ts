@@ -11,6 +11,7 @@ import { z } from 'zod'
 import { WireReply } from '../../shared/schema'
 import type { TutorReplyT } from '../../shared/contracts'
 import { SYSTEM_PROMPT } from './prompt'
+import { outputConfig } from './provider'
 
 export type Tag =
   | 'STUDENT'
@@ -24,9 +25,8 @@ export type Tag =
   | 'STEP STUCK'
   | 'STEP REVISIT'
   | 'STEP CLAIM'
-  | 'ANIMATE CODE'
-  | 'ANIMATE PROBLEM'
-  | 'ANIMATE QUESTION'
+  | 'ANIMATE'
+  | 'EXAMPLE'
 
 export interface ImageInput {
   data: string // base64, no data: prefix
@@ -226,11 +226,9 @@ export class Tutor implements TutorLike {
         }
       ],
       messages: withCacheBreakpoint(this.messages),
-      output_config:
-        this.transport.mode === 'structured'
-          ? { effort, format: { type: 'json_schema', schema: replySchema } }
-          : { effort }
+      output_config: outputConfig(this.transport.model, effort, this.transport.mode === 'structured' ? replySchema : undefined)
     }
+    if (!params.output_config) delete params.output_config
     if (this.transport.mode === 'tool') {
       params.tools = [REPLY_TOOL]
       params.tool_choice = { type: 'auto' } // forced tool use isn't allowed on Opus 5.5; the prompt asks for it
@@ -294,7 +292,7 @@ export function withEmptyDefaults(input: unknown): unknown {
       expects: 'text',
       choices: [],
       ...turn,
-      visual: { caption: '', frames: [], focus: [], ...(turn.visual as object | undefined) },
+      visual: { caption: '', frames: [], narration: [], ...(turn.visual as object | undefined) },
       check: turn.check ?? { kind: 'none', reference: '', variable: '', unit: '' }
     }
   }

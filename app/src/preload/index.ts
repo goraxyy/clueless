@@ -37,9 +37,6 @@ const api: CluelessApi = {
   onVoiceState: (cb) => listen(IPC.voiceState, cb),
   onVoiceToggle: (cb) => listen(IPC.voiceToggle, cb),
   tts: (req) => ipcRenderer.invoke(IPC.voiceTts, req),
-  playOnScreen: (play) => ipcRenderer.send(IPC.stagePlay, play),
-  stopOnScreen: () => ipcRenderer.send(IPC.stageStop),
-  onStage: (cb) => listen(IPC.stageShow, cb),
   onStageIsland: (cb) => listen(IPC.stageIsland, cb)
 }
 

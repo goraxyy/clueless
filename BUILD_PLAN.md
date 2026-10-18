@@ -38,7 +38,11 @@ Tick a box by changing `- [ ]` to `- [x]`.
 - [x] Restored work lost in the PR #3 merge, island as its own mode (PR #4) — Ali
 - [x] Sonnet 5.5 for the tutor, Haiku 5.5 for small jobs, and a 15-problem model test set (`npm run eval`) — Ali
 - [x] Removed flashcards (the recap and the gap list stay) — Ali
-- [x] Tests (126), typecheck, smoke test of the panel, the island, Python runs, the stage and the visual island
+- [x] Simpler panel: 3 opening options, one answer box (no Answer / How do I write choice), one row
+  of buttons (Hint, What next?, Check my work, Animate), the recap comes by itself, no Reveal or
+  Finish, and every animation plays in the visual island — Ali
+- [x] Highlights work from launch, not only with the pill open — Ali
+- [x] Tests (127), typecheck, smoke test of the panel, the island, Python runs, the stage and the visual island
 
 ## Next
 

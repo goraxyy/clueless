@@ -5,7 +5,7 @@
 // finished reading the current one aloud.
 // No Electron or Node imports, so the tests run it with a fake tracer and timers.
 import { SPEEDS, stepCount, type CodeSpot, type IslandView } from './contracts'
-import type { TraceReply } from './trace'
+import type { Lesson, TraceReply } from './trace'
 
 export interface ScreenImage {
   data: string // base64, no data: prefix
@@ -21,7 +21,8 @@ export interface AskInput {
 /** One conversation with Claude about one highlight. */
 export interface TracerLike {
   ask(input: AskInput): Promise<TraceReply>
-  followUp(text: string, animate: boolean): Promise<TraceReply>
+  /** `image`: the screen right now, so a follow-up can be about what's on it. */
+  followUp(text: string, animate: boolean, image?: ScreenImage | null): Promise<TraceReply>
 }
 
 /** What a capture finds: the screen for Claude, and where the highlight sits on it. */
@@ -35,6 +36,8 @@ export interface IslandDeps {
   makeTracer(): TracerLike | null
   /** A screenshot of the screen the student is working on (Clueless's own windows hidden). */
   capture(snippet: string): Promise<IslandCapture>
+  /** Just a screenshot of that screen, for follow-ups. */
+  screen?(): Promise<ScreenImage | null>
   emit(view: IslandView): void
   /** Run `fn` after `ms`; returns a cancel function. */
   schedule(fn: () => void, ms: number): () => void
@@ -136,7 +139,10 @@ export class IslandController {
     this.view.playback = null
     this.view.busySince = this.deps.now()
     this.emit()
-    await this.attempt(run, animate, () => tracer.followUp(text, animate))
+    await this.attempt(run, animate, async () => {
+      const image = (await this.deps.screen?.()) ?? null
+      return run === this.run ? tracer.followUp(text, animate, image) : null
+    })
   }
 
   /** ✕ on the Ask card, a new session, Hide: nothing asked any more. Anything in flight is dropped. */
@@ -178,9 +184,21 @@ export class IslandController {
   }
 
   replay(): void {
-    if (!stepCount(this.view) || this.view.phase !== 'answer') return
+    if (!stepCount(this.view) || this.view.phase === 'thinking') return
     this.view.notice = null
     this.view.spotLost = false
+    this.startPlayback()
+  }
+
+  /** The tutor's Animate: its frames play in the visual island, with no highlight on the code.
+   *  The panel's conversation is left alone (nothing is asked here). */
+  playLesson(lesson: Lesson): void {
+    if (!lesson.steps.length || this.view.phase === 'thinking') return
+    this.view.trace = null
+    this.view.lesson = lesson
+    this.view.spot = null
+    this.view.spotLost = false
+    this.view.notice = null
     this.startPlayback()
   }
 

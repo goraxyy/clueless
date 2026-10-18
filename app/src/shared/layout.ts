@@ -80,10 +80,12 @@ export function placeCard(
 }
 
 /** A smooth arrow path between two points, leaving and arriving along the given side. */
-export function arrowPath(from: Point, to: Point, side: Side): string {
+export function arrowPath(from: Point, to: Point, side: Side, exit: 1 | -1 = 1): string {
   if (side === 'below' || side === 'above') {
-    const dy = (to.y - from.y) / 2
-    return `M${from.x} ${from.y} C${from.x} ${from.y + dy} ${to.x} ${to.y - dy} ${to.x} ${to.y}`
+    // Out sideways from the end of the line (clear of the code), then into the card's near edge.
+    const out = exit * Math.max(40, Math.abs(to.x - from.x) * 0.5)
+    const into = (side === 'below' ? -1 : 1) * Math.max(30, Math.abs(to.y - from.y) * 0.5)
+    return `M${from.x} ${from.y} C${from.x + out} ${from.y} ${to.x} ${to.y + into} ${to.x} ${to.y}`
   }
   const dx = (to.x - from.x) / 2
   return `M${from.x} ${from.y} C${from.x + dx} ${from.y} ${to.x - dx} ${to.y} ${to.x} ${to.y}`
@@ -93,13 +95,16 @@ export function arrowPath(from: Point, to: Point, side: Side): string {
  * The arrow from the code line at `anchorY` (in `area`, the highlighted code) to a card that's
  * already somewhere (the visual island). null when the card covers the code.
  */
-export function arrowTo(area: Rect, anchorY: number, card: Rect): { from: Point; to: Point; side: Side } | null {
+export function arrowTo(area: Rect, anchorY: number, card: Rect): { from: Point; to: Point; side: Side; exit: 1 | -1 } | null {
   const cardY = clamp(anchorY, card.y + 18, card.y + card.height - 18)
   const cardX = card.x + card.width / 2
-  const lineX = clamp(cardX, area.x + 16, area.x + area.width - 16)
-  if (card.x >= area.x + area.width) return { from: { x: area.x + area.width, y: anchorY }, to: { x: card.x, y: cardY }, side: 'right' }
-  if (card.x + card.width <= area.x) return { from: { x: area.x, y: anchorY }, to: { x: card.x + card.width, y: cardY }, side: 'left' }
-  if (card.y >= area.y + area.height) return { from: { x: lineX, y: area.y + area.height }, to: { x: cardX, y: card.y }, side: 'below' }
-  if (card.y + card.height <= area.y) return { from: { x: lineX, y: area.y }, to: { x: cardX, y: card.y + card.height }, side: 'above' }
+  if (card.x >= area.x + area.width) return { from: { x: area.x + area.width, y: anchorY }, to: { x: card.x, y: cardY }, side: 'right', exit: 1 }
+  if (card.x + card.width <= area.x) return { from: { x: area.x, y: anchorY }, to: { x: card.x + card.width, y: cardY }, side: 'left', exit: -1 }
+  // A card above or below: the arrow still starts at the running line, from the end nearer the card.
+  const exit = cardX >= area.x + area.width / 2 ? 1 : -1
+  const fromX = exit === 1 ? area.x + area.width : area.x
+  const toX = clamp(cardX, card.x + 24, card.x + card.width - 24)
+  if (card.y >= area.y + area.height) return { from: { x: fromX, y: anchorY }, to: { x: toX, y: card.y }, side: 'below', exit }
+  if (card.y + card.height <= area.y) return { from: { x: fromX, y: anchorY }, to: { x: toX, y: card.y + card.height }, side: 'above', exit }
   return null
 }
