@@ -1,8 +1,8 @@
-// A hand-written trace for the browser mock (`npm run ui`) and the tests: LeetCode 217,
+// A hand-written trace for the tests: LeetCode 217,
 // Contains Duplicate, run on nums = [3, 1, 4, 1]. Same shape Claude sends.
 import type { EntityValue, TraceReply, TraceStep } from '../../../shared/trace'
 
-export const MOCK_CODE = `class Solution:
+export const SAMPLE_CODE = `class Solution:
     def containsDuplicate(self, nums: List[int]) -> bool:
         seen = set()
         for i in range(len(nums)):
@@ -44,7 +44,7 @@ export const CONTAINS_DUPLICATE: TraceReply & { trace: NonNullable<TraceReply['t
     'Watch `seen` fill up as the loop walks through `nums = [3, 1, 4, 1]`. Keep an eye on the moment a number shows up that is already inside `seen`.',
   trace: {
     language: 'python',
-    code: MOCK_CODE,
+    code: SAMPLE_CODE,
     entities: [
       { id: 'nums', name: 'nums', kind: 'array', indexOf: null },
       { id: 'seen', name: 'seen', kind: 'set', indexOf: null },
@@ -59,5 +59,6 @@ export const CONTAINS_DUPLICATE: TraceReply & { trace: NonNullable<TraceReply['t
       ...pass(2, ['3', '1']),
       ...pass(3, ['3', '1', '4'])
     ]
-  }
+  },
+  lesson: null
 }

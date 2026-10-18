@@ -1,17 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import type { IslandView } from './contracts'
 import {
-  FINISHED_MS,
   INTRO_MS,
   IslandController,
   MIN_STEP_MS,
   NO_KEY_MESSAGE,
+  READ_MS_PER_WORD,
   SCROLLED_NOTICE,
   STEP_MS,
   type AskInput,
   type TracerLike
 } from './islandController'
-import type { CodeTrace, TraceReply } from './trace'
+import type { CodeTrace, Lesson, TraceReply } from './trace'
 
 const TRACE: CodeTrace = {
   language: 'python',
@@ -31,7 +31,22 @@ const TRACE: CodeTrace = {
   ]
 }
 
+const LESSON: Lesson = {
+  text: 'Find the area under y = x^2 from 0 to 1.',
+  steps: [
+    {
+      line: 1,
+      endLine: 1,
+      say: 'The area is the sum of many thin strips under the curve, each one a little taller than the last.',
+      scene: { type: 'numberline', min: 0, max: 1, marks: [{ x: 0.5, label: 'strip' }] }
+    },
+    { line: null, endLine: null, say: 'Add them up.', scene: { type: 'numberline', min: 0, max: 1, marks: [] } }
+  ]
+}
+
 const SPOT = { displayId: 1, left: 100, width: 300, top: 200, lineHeight: 20, lines: 1 }
+
+const reply = (message: string, trace: CodeTrace | null = null, lesson: Lesson | null = null): TraceReply => ({ message, trace, lesson })
 
 class FakeTracer implements TracerLike {
   asked: AskInput[] = []
@@ -49,29 +64,26 @@ class FakeTracer implements TracerLike {
   }
   private next(): Promise<TraceReply> {
     if (this.hold) return new Promise((r) => (this.pending = r))
-    return Promise.resolve(this.replies.shift() ?? { message: 'Plain text.', trace: null })
+    return Promise.resolve(this.replies.shift() ?? reply('Plain text.'))
   }
 }
 
-function setup(opts: { tracer?: FakeTracer | null; animate?: boolean } = {}) {
+function setup(opts: { tracer?: FakeTracer | null } = {}) {
   const tracer = opts.tracer === undefined ? new FakeTracer() : opts.tracer
   const views: IslandView[] = []
   const timers: { fn: () => void; ms: number; cancelled: boolean }[] = []
   let now = 1000
-  const controller = new IslandController(
-    {
-      makeTracer: () => tracer,
-      capture: async () => ({ image: { data: 'SCREEN', mediaType: 'image/jpeg' }, spot: SPOT }),
-      emit: (v) => views.push(v),
-      schedule: (fn, ms) => {
-        const t = { fn, ms, cancelled: false }
-        timers.push(t)
-        return () => (t.cancelled = true)
-      },
-      now: () => now
+  const controller = new IslandController({
+    makeTracer: () => tracer,
+    capture: async () => ({ image: { data: 'SCREEN', mediaType: 'image/jpeg' }, spot: SPOT }),
+    emit: (v) => views.push(v),
+    schedule: (fn, ms) => {
+      const t = { fn, ms, cancelled: false }
+      timers.push(t)
+      return () => (t.cancelled = true)
     },
-    opts.animate ?? true
-  )
+    now: () => now
+  })
   const pending = () => timers.filter((t) => !t.cancelled)
   const fire = (): number => {
     const t = pending()[0]
@@ -85,11 +97,11 @@ function setup(opts: { tracer?: FakeTracer | null; animate?: boolean } = {}) {
 }
 
 describe('IslandController', () => {
-  it('Animate on: thinking -> the answer and the animation on the code, step by step, then it clears', async () => {
-    const { controller, tracer, views, fire, last } = setup()
-    tracer!.replies.push({ message: 'Watch `n`.', trace: TRACE })
-    await controller.ask('n = 5')
-    expect(views[0].phase).toBe('thinking')
+  it('Animate: thinking -> the answer and the animation, step by step; it stays on the last step until Stop', async () => {
+    const { controller, tracer, views, fire, pending, last } = setup()
+    tracer!.replies.push(reply('Watch `n`.', TRACE))
+    await controller.ask('n = 5', true)
+    expect(views[0]).toMatchObject({ phase: 'thinking', animate: true })
     expect(tracer!.asked[0]).toEqual({ snippet: 'n = 5', image: { data: 'SCREEN', mediaType: 'image/jpeg' }, animate: true })
     expect(last()).toMatchObject({ phase: 'answer', spot: SPOT, playback: { index: -1, playing: true } })
     expect(last().messages).toEqual([{ role: 'clueless', text: 'Watch `n`.' }])
@@ -97,7 +109,10 @@ describe('IslandController', () => {
     expect(last().playback).toMatchObject({ index: 0, playing: true })
     expect(fire()).toBe(STEP_MS)
     expect(last().playback).toMatchObject({ index: 1, playing: false }) // finished on the last step
-    expect(fire()).toBe(FINISHED_MS)
+    expect(pending()).toHaveLength(0) // and it stays there
+    controller.step(-1)
+    expect(last().playback).toMatchObject({ index: 0, playing: false }) // go back through it
+    controller.stopPlayback()
     expect(last()).toMatchObject({ phase: 'answer', playback: null }) // the text stays
     controller.replay()
     expect(last().playback).toMatchObject({ index: -1, playing: true })
@@ -107,8 +122,8 @@ describe('IslandController', () => {
 
   it('pause, step by hand, and play on', async () => {
     const { controller, tracer, pending, fire, last } = setup()
-    tracer!.replies.push({ message: 'Watch.', trace: TRACE })
-    await controller.ask('n = 5')
+    tracer!.replies.push(reply('Watch.', TRACE))
+    await controller.ask('n = 5', true)
     fire() // intro over
     controller.pause()
     expect(last().playback).toMatchObject({ index: 0, playing: false })
@@ -124,11 +139,25 @@ describe('IslandController', () => {
     expect(last().playback).toMatchObject({ index: 1, playing: false })
   })
 
-  it('with voice on, a step lasts until the panel has read it aloud (but never less than a moment)', async () => {
+  it('the speed button changes how long each step stays, from now', async () => {
+    const { controller, tracer, pending, fire, last } = setup()
+    tracer!.replies.push(reply('Watch.', TRACE))
+    await controller.ask('n = 5', true)
+    controller.setSpeed(2)
+    expect(last().speed).toBe(2)
+    expect(pending()).toHaveLength(1) // the current step was re-timed, not doubled up
+    expect(fire()).toBe(INTRO_MS / 2)
+    controller.setSpeed(0.5)
+    expect(fire()).toBe(STEP_MS * 2)
+    controller.setSpeed(3) // not one of the speeds: ignored
+    expect(last().speed).toBe(0.5)
+  })
+
+  it('with voice on, a step lasts until the visual island has read it aloud (but never less than a moment)', async () => {
     const { controller, tracer, pending, fire, wait, last } = setup()
     controller.setNarrated(true)
-    tracer!.replies.push({ message: 'Watch.', trace: TRACE })
-    await controller.ask('n = 5')
+    tracer!.replies.push(reply('Watch.', TRACE))
+    await controller.ask('n = 5', true)
     const nonce = last().playback!.nonce
     controller.stepDone(nonce, -1) // the intro was read
     expect(fire()).toBe(MIN_STEP_MS) // no time had passed: wait the minimum
@@ -141,21 +170,32 @@ describe('IslandController', () => {
     expect(last().playback).toMatchObject({ index: 1, playing: false })
   })
 
-  it('stops the animation when the page scrolls, and Replay brings it back', async () => {
-    const { controller, tracer, last } = setup()
-    tracer!.replies.push({ message: 'Watch.', trace: TRACE })
-    await controller.ask('n = 5')
-    controller.scrolled()
-    expect(last()).toMatchObject({ playback: null, notice: SCROLLED_NOTICE })
-    controller.replay()
-    expect(last()).toMatchObject({ notice: null, playback: { index: -1 } })
+  it('a concept lesson plays like a trace, each step long enough to read what it says', async () => {
+    const { controller, tracer, fire, last } = setup()
+    tracer!.replies.push(reply('Watch the strips add up.', null, LESSON))
+    await controller.ask(LESSON.text, true)
+    expect(last()).toMatchObject({ lesson: LESSON, trace: null, playback: { index: -1, playing: true } })
+    fire() // intro
+    expect(fire()).toBe(LESSON.steps[0].say.split(' ').length * READ_MS_PER_WORD) // a long line stays longer
+    expect(last().playback).toMatchObject({ index: 1, playing: false })
   })
 
-  it('Animate off: text only, and follow-ups continue the conversation', async () => {
-    const { controller, tracer, pending, last } = setup({ animate: false })
-    tracer!.replies.push({ message: 'It sets n.', trace: TRACE })
-    await controller.ask('n = 5')
-    expect(last()).toMatchObject({ phase: 'answer', playback: null })
+  it('a scroll hides the highlight on the code but the island plays on; Replay brings the highlight back', async () => {
+    const { controller, tracer, pending, last } = setup()
+    tracer!.replies.push(reply('Watch.', TRACE))
+    await controller.ask('n = 5', true)
+    controller.scrolled()
+    expect(last()).toMatchObject({ spotLost: true, notice: SCROLLED_NOTICE, playback: { playing: true } })
+    expect(pending()).toHaveLength(1)
+    controller.replay()
+    expect(last()).toMatchObject({ spotLost: false, notice: null, playback: { index: -1 } })
+  })
+
+  it('Ask: text only, and follow-ups continue the conversation', async () => {
+    const { controller, tracer, pending, last } = setup()
+    tracer!.replies.push(reply('It sets n.', TRACE))
+    await controller.ask('n = 5', false)
+    expect(last()).toMatchObject({ phase: 'answer', playback: null, animate: false })
     expect(tracer!.asked[0].animate).toBe(false)
     expect(pending()).toHaveLength(0)
     await controller.followUp('why 5?')
@@ -163,22 +203,21 @@ describe('IslandController', () => {
     expect(last().messages.map((m) => m.role)).toEqual(['clueless', 'student', 'clueless'])
   })
 
-  it('turning Animate off takes the animation off the screen', async () => {
+  it('animates even when the highlight could not be found on screen (the island needs no position)', async () => {
     const { controller, tracer, last } = setup()
-    tracer!.replies.push({ message: 'Watch.', trace: TRACE })
-    await controller.ask('n = 5')
-    controller.setAnimate(false)
-    expect(last()).toMatchObject({ animate: false, playback: null, phase: 'answer' })
+    tracer!.replies.push(reply('Watch.', TRACE))
+    await controller.ask('n = 5', true)
+    expect(last().playback).not.toBeNull()
   })
 
   it('drops a reply that arrives after the card was closed', async () => {
     const { controller, tracer, last } = setup()
     tracer!.hold = true
-    const asking = controller.ask('n = 5')
+    const asking = controller.ask('n = 5', true)
     await Promise.resolve()
     await Promise.resolve()
     controller.close()
-    tracer!.pending?.({ message: 'late', trace: TRACE })
+    tracer!.pending?.(reply('late', TRACE))
     await asking
     expect(last().phase).toBe('idle')
     expect(last().messages).toEqual([])
@@ -186,15 +225,17 @@ describe('IslandController', () => {
 
   it('explains what to do when there is no Claude key', async () => {
     const { controller, last } = setup({ tracer: null })
-    await controller.ask('n = 5')
+    await controller.ask('n = 5', false)
     expect(last()).toMatchObject({ phase: 'answer', error: NO_KEY_MESSAGE })
   })
 
-  it('keeps both switches across questions', async () => {
+  it('keeps the switch, the speed and the voice setting across questions', async () => {
     const { controller, last } = setup()
     controller.setAskOnHighlight(false)
-    await controller.ask('n = 5')
+    controller.setSpeed(1.5)
+    controller.setVoice(false)
+    await controller.ask('n = 5', true)
     controller.close()
-    expect(last()).toMatchObject({ askOnHighlight: false, animate: true })
+    expect(last()).toMatchObject({ askOnHighlight: false, speed: 1.5, voice: false, animate: false })
   })
 })

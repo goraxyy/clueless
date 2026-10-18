@@ -16,6 +16,16 @@
   --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 }
 
+/* dark: follows the system theme, and is always on inside .dark (the visual island is always dark). */
+@custom-variant dark {
+  @media (prefers-color-scheme: dark) {
+    @slot;
+  }
+  &:where(.dark, .dark *) {
+    @slot;
+  }
+}
+
 html,
 body,
 #root {
@@ -29,11 +39,6 @@ body {
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
   user-select: none;
-}
-
-/* Browser mock mode (npm run ui): pretend there's a desktop behind the panel. */
-body.mock-desktop {
-  background: linear-gradient(135deg, #1e293b, #0f172a 60%, #312e81);
 }
 
 .drag {

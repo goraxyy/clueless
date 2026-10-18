@@ -8,7 +8,7 @@ instead of giving you the answer.
 
 | | |
 |---|---|
-| **Ali** | The idea and the docs. The app's base: the floating panel, screen capture, the tutor (Claude prompt and engine), answer checking, stuck detection, gap tracking, Bedrock support, full-screen support, the compact orange panel. Repaired the PR #3 merge (PR #4). Then: Ask's answers in the panel and its animations on the real screen, code runs (Pyodide), voice in step with the animation, Sonnet/Haiku per task with a test set, flashcards removed. |
+| **Ali** | The idea and the docs. The app's base: the floating panel, screen capture, the tutor (Claude prompt and engine), answer checking, stuck detection, gap tracking, Bedrock support, full-screen support, the compact orange panel. Repaired the PR #3 merge (PR #4). Then: Ask's answers in the panel and its animations on the real screen, code runs (Pyodide), voice in step with the animation, Sonnet/Haiku per task with a test set, flashcards removed. Then: Ask / Animate on a highlight with the visual island (back, stop, speed, its own voice) and concept lessons for non-code, the small window's text box and voice button, settings in both windows, browser preview removed. |
 | **Nuris** | Panel improvements: asks what's tripping you up after a scan, shorter replies, resizable panel, layout fixes, clickable plan steps. |
 | **Rasim** | Voice: talking to Clueless (Deepgram) and Clueless talking back (ElevenLabs). PRs #1 and #2. |
 | **Nurassyl** | Animations: the visual engine, Animate my code / problem / question, code mode and explain mode. The island: highlight code, Ask, step-by-step trace. PR #3. |
@@ -30,11 +30,19 @@ of that gap. Clueless is that hint-giving version, and it works on whatever is o
 
 The panel shows only your latest message and the latest reply.
 
-**The island** (`Cmd/Ctrl + Shift + 3`) is a second, quicker way in. It's a small pill with two
-switches: **Ask** (show an Ask button after you highlight something) and **Animate**. Highlight, click
-**Ask**, and the answer shows in the panel. With Animate on, highlighted code runs step by step right
-where it is on your screen: the running line lights up, and your variables change in a card beside it.
-With voice on, each step is read aloud and the animation waits for it.
+**The island** (`Cmd/Ctrl + Shift + 3`) is a second, quicker way in. It's a small pill with one
+switch, **Highlight**: while it's on, highlighting anything brings up two buttons next to the cursor.
+- **Ask**: the answer shows in the panel.
+- **Animate**: the answer is explained step by step in the **visual island**, a small window of its
+  own beside your text, with a voice in step with the picture. Code runs for real and its variables
+  are drawn as boxes; anything else (a math problem, a paragraph) gets a short lesson, a picture per
+  step, that sets up the problem and the idea behind it but never solves it. On your screen the line
+  each step is about lights up, with an arrow to the visual island. Its buttons: back, play/pause,
+  forward, stop, speed (0.5× to 2×, voice included) and voice on/off. Drag it anywhere.
+
+**The windows.** The panel's header has your gaps, shrink, and settings (transparency, new session,
+quit). Shrunk, it's a small bar: the logo reads the screen, a box takes a typed question or answer,
+the mic talks, the speaker turns spoken replies on or off, and settings are on the right.
 
 ## Rules the tutor follows
 
@@ -67,9 +75,11 @@ plug in a number; units and extreme cases). Anything else gets the same loop wit
 ```
 Electron app
   main process   windows, hotkeys, screen capture, Claude calls, voice, memory
-  panel          the tutor (React)
-  stage          a see-through window that draws animations over your code
-  island         the pill and the Ask button
+  panel          the tutor (React), also the small window
+  stage          a see-through window that draws over your screen (the tutor's code animations,
+                 the line an Animate step is on)
+  island         the pill and the Ask / Animate buttons
+  visual island  an Animate run's picture, voice and controls
 ```
 
 **Claude.** Through Amazon Bedrock or the Claude API, picked from `app/.env`.
@@ -91,17 +101,22 @@ differentiating, and compares units.
 **Animations.**
 - Panel animations come from the tutor's reply as a small list of scenes (arrays, grids, sets, maps,
   plots, vectors, trees, graphs), drawn with React and Motion.
-- Ask on Python code runs it for real. Haiku picks a small input and how to call the code;
+- Animate on Python code runs it for real. Haiku picks a small input and how to call the code;
   Pyodide (Python in WebAssembly, in a worker thread, with a step and time limit) runs it, and every
   line and value change becomes a step. Other languages, or a run that won't start: Claude writes
   the steps instead, which is slower.
-- Where the code is on screen comes from where your drag started and ended and how many lines you
-  copied, fine-tuned on the screenshot (lines of text have ink, the gaps between them don't).
-  Scrolling stops the animation, since the drawing would no longer line up.
+- Animate on anything that isn't code: Claude writes a lesson of 3 to 8 steps, each a scene (the
+  same kinds the panel draws), the lines of the highlight it's about, and a sentence to say over it.
+- Where the highlight is on screen comes from where your drag started and ended and how many lines
+  you copied, fine-tuned on the screenshot (lines of text have ink, the gaps between them don't).
+  Scrolling hides the line highlight, since it would no longer line up; the visual island plays on.
+- The visual island is placed beside the highlight (right, left, below or above, whichever fits,
+  out from under the panel) and stays where you drag it.
 
 **Voice.** Deepgram turns speech into text in the main process. ElevenLabs reads replies out loud, or
-the computer's own voice if there's no key. Animation steps are narrated from the trace itself (no
-model call), and the next step starts when the current line has been read.
+the computer's own voice if there's no key. The visual island has its own voice: code steps are
+narrated from the trace itself (no model call), lesson steps read the line Claude wrote, and the next
+step starts when the current line has been read. The speed button speeds up the voice too.
 
 **Memory.** One JSON file in the app's data folder: gaps seen and past sessions.
 
@@ -111,7 +126,10 @@ KaTeX, Pyodide and uiohook-napi.
 ## Known limits
 
 - Only Python is run for real; other languages are traced by Claude, which takes longer.
-- The on-screen animation lines up with the code only while the page stays put.
+- The line highlight lines up with your text only while the page stays put. A paragraph that wraps
+  onto several screen lines counts as one line.
+- Animate takes a while when Claude writes the steps (other languages, and anything that isn't code):
+  the whole reply arrives before step 1.
 - The island reads your highlight by pressing `Cmd/Ctrl + C`; in a terminal that stops the running program.
 - Not yet tested much on Windows.
 

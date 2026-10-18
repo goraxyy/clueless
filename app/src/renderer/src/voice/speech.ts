@@ -18,6 +18,8 @@ export interface SpeechService {
   pause(): void
   resume(): void
   stop(): void
+  /** How fast to talk: 1 = normal, 2 = twice as fast. Applies to what's playing and what comes next. */
+  setRate(rate: number): void
   snapshot(): SpeechSnapshot
   subscribe(cb: (s: SpeechSnapshot) => void): () => void
 }
@@ -51,6 +53,7 @@ export function createBrowserSpeech(
   let generation = 0 // bumps on every speak/stop; callbacks from older speech are ignored
   let poll: ReturnType<typeof setInterval> | null = null
   let voice: SpeechSynthesisVoice | null = null
+  let rate = 1
 
   const set = (next: Partial<SpeechSnapshot>): void => {
     snap = { ...snap, ...next }
@@ -112,6 +115,7 @@ export function createBrowserSpeech(
         const u = new Utterance(chunks[i])
         if (voice) u.voice = voice
         u.lang = voice?.lang ?? lang
+        u.rate = rate
         let ended = false
         const next = (): void => {
           if (ended) return
@@ -165,6 +169,9 @@ export function createBrowserSpeech(
       synth.resume()
       set({ state: 'speaking' })
     },
+    setRate: (r) => {
+      rate = r // the built-in voice can't change speed mid-sentence: the next sentence picks it up
+    },
     snapshot: () => snap,
     subscribe: (cb) => {
       listeners.add(cb)
@@ -208,6 +215,7 @@ export function createCloudSpeech(
   let url: string | null = null
   let onFallback = false
   let notice: string | null = null // why we switched to the built-in voice
+  let rate = 1
 
   const set = (next: Partial<SpeechSnapshot>): void => {
     snap = { ...snap, ...next }
@@ -283,6 +291,8 @@ export function createCloudSpeech(
       url = URL.createObjectURL(new Blob([res.audio], { type: res.mime }))
       const a = (audio ??= makeAudio())
       a.src = url
+      a.defaultPlaybackRate = rate // a new src resets the speed to this
+      a.playbackRate = rate
       a.onended = () => void play(i + 1)
       a.onerror = () => switchToFallback(i, { ok: false, reason: 'error', message: "couldn't play the audio." })
       if (snap.state === 'paused') return // paused while it was downloading: resume() starts it
@@ -313,6 +323,11 @@ export function createCloudSpeech(
       if (snap.state !== 'paused') return
       set({ state: 'speaking' })
       if (audio?.src) void audio.play().catch(() => {})
+    },
+    setRate: (r) => {
+      rate = r
+      if (audio) audio.playbackRate = r
+      fallback.setRate(r)
     },
     snapshot: () => snap,
     subscribe: (cb) => {

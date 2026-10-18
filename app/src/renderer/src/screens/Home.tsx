@@ -1,10 +1,10 @@
-// Header, setup banners and the empty "stuck on something?" screen.
+// The big window's header, the small window's bar, settings, setup banners and the empty
+// "stuck on something?" screen.
 import { useRef, useState, type ButtonHTMLAttributes } from 'react'
 import type { AppStatus, StuckState } from '../../../shared/contracts'
 import { api } from '../api'
 import {
   BulbIcon,
-  CloseIcon,
   ExpandIcon,
   FileIcon,
   GapsIcon,
@@ -13,11 +13,13 @@ import {
   Logo,
   MinusIcon,
   MonitorIcon,
+  PlusIcon,
   PowerIcon,
-  ScanIcon,
   SelectAreaIcon,
   SendIcon,
-  SparkleIcon
+  SparkleIcon,
+  SpeakerIcon,
+  SpeakerOffIcon
 } from '../components/icons'
 import { MicButton } from '../components/MicButton'
 import { Button, cx, hotkeyLabel, IconButton } from '../components/ui'
@@ -27,22 +29,20 @@ export type Glass = 'glass' | 'clear' | 'solid'
 export const GLASS_ALPHA: Record<Glass, number> = { glass: 0.62, clear: 0.38, solid: 0.96 }
 const NEXT_GLASS: Record<Glass, Glass> = { glass: 'clear', clear: 'solid', solid: 'glass' }
 
+/** The big window's top bar: your gaps, shrink to the small window, and settings on the right. */
 export function Header({
-  compact,
   stuck,
-  glass,
-  onGlass,
-  onToggleCompact,
+  menuOpen,
+  onToggleMenu,
+  onShrink,
   onOpenGaps
 }: {
-  compact: boolean
   stuck: StuckState | null
-  glass: Glass
-  onGlass: (g: Glass) => void
-  onToggleCompact: () => void
+  menuOpen: boolean
+  onToggleMenu: () => void
+  onShrink: () => void
   onOpenGaps: () => void
 }) {
-  const [menu, setMenu] = useState(false)
   return (
     <header className="drag relative flex h-11 shrink-0 items-center gap-2 border-b border-zinc-900/10 pl-3 pr-2 dark:border-white/10">
       <div className="flex h-[26px] w-[26px] items-center justify-center rounded-[7px] bg-gradient-to-b from-claude-400 to-claude-500 text-white shadow-sm">
@@ -56,67 +56,45 @@ export function Header({
         />
       )}
       <div className="ml-auto flex items-center gap-1">
-        {compact && (
-          <Button variant="primary" className="mr-1 h-7 px-2.5 text-xs" onClick={() => api.ask('screen')}>
-            <ScanIcon size={13} /> Ask
-          </Button>
-        )}
         <HeaderButton title="Your gaps" onClick={onOpenGaps}>
           <GapsIcon size={15} />
         </HeaderButton>
-        <HeaderButton title={`Transparency: ${glass} (click to change)`} onClick={() => onGlass(NEXT_GLASS[glass])}>
-          <LayersIcon size={14} className={glass === 'solid' ? '' : glass === 'glass' ? 'opacity-80' : 'opacity-50'} />
+        <HeaderButton title="Shrink to the small window" onClick={onShrink}>
+          <MinusIcon size={15} />
         </HeaderButton>
-        <HeaderButton title={compact ? 'Expand' : 'Shrink to a bar'} onClick={onToggleCompact}>
-          {compact ? <ExpandIcon size={13} /> : <MinusIcon size={15} />}
-        </HeaderButton>
-        <HeaderButton title="Hide (Esc). The hotkey brings it back." onClick={() => api.hide()}>
-          <CloseIcon size={15} />
-        </HeaderButton>
-        <HeaderButton title="Settings" onClick={() => setMenu(!menu)} aria-expanded={menu}>
-          <GearIcon size={14} />
-        </HeaderButton>
+        <SettingsButton open={menuOpen} onClick={onToggleMenu} />
       </div>
-      {menu && (
-        <>
-          <div className="no-drag fixed inset-0 z-10" onClick={() => setMenu(false)} />
-          <div className="no-drag absolute right-2 top-[40px] z-20 w-40 rounded-lg border border-zinc-900/10 bg-white p-1 text-[12px] shadow-lg dark:border-white/10 dark:bg-zinc-900">
-            <button
-              type="button"
-              onClick={() => onGlass(NEXT_GLASS[glass])}
-              className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-white/10"
-            >
-              Transparency <span className="capitalize text-zinc-400">{glass}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => api.quit()}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/10"
-            >
-              <PowerIcon size={14} /> Quit Clueless
-            </button>
-          </div>
-        </>
-      )}
     </header>
   )
 }
 
 /**
- * Compact mode: just a pill. The logo reads the screen; the mic talks to Clueless right from here
- * (with no problem yet, what you say becomes the problem). Drag it anywhere.
+ * The small window: the logo reads the screen, the box takes a typed question (or answer), the mic
+ * talks to Clueless, the speaker turns its spoken replies on or off. Drag it anywhere.
  */
 export function CompactBar({
   conv,
   busy,
-  onExpand
+  menuOpen,
+  onToggleMenu,
+  onExpand,
+  onSubmit
 }: {
   conv: VoiceConversation
   busy: boolean // the tutor is working
+  menuOpen: boolean
+  onToggleMenu: () => void
   onExpand: () => void
+  onSubmit: (text: string) => void
 }) {
+  const [text, setText] = useState('')
+  const submit = (): void => {
+    if (!text.trim() || busy) return
+    onSubmit(text.trim())
+    setText('')
+  }
   return (
-    <div className="drag flex h-[52px] items-center gap-2.5 pl-2.5 pr-2">
+    <div className="drag flex h-[52px] items-center gap-1.5 pl-2.5 pr-2">
       <button
         type="button"
         onClick={() => api.ask('screen')}
@@ -126,16 +104,80 @@ export function CompactBar({
       >
         <Logo size={16} />
       </button>
-      <span className="text-[15px] font-medium tracking-tight text-zinc-900 dark:text-zinc-50">Clueless</span>
-      <span className="ml-auto" />
+      <input
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            submit()
+          }
+        }}
+        placeholder={busy ? 'Clueless is thinking…' : 'Ask Clueless…'}
+        title="Type a question or an answer, then press Enter"
+        className="no-drag h-[34px] min-w-0 flex-1 rounded-full border border-zinc-900/10 bg-white/55 px-3 text-[13.5px] text-zinc-900 outline-none transition-colors placeholder:text-zinc-400 focus:border-claude-400/70 dark:border-white/15 dark:bg-white/[0.06] dark:text-zinc-50 dark:placeholder:text-zinc-500"
+      />
       <MicButton conv={conv} disabled={busy} round />
+      <HeaderButton
+        title={conv.enabled ? 'Clueless reads its replies aloud. Click to mute' : 'Have Clueless read its replies aloud'}
+        aria-pressed={conv.enabled}
+        onClick={() => conv.setEnabled(!conv.enabled)}
+        className={conv.enabled ? 'text-claude-500 dark:text-claude-400' : undefined}
+      >
+        {conv.enabled ? <SpeakerIcon size={16} /> : <SpeakerOffIcon size={16} />}
+      </HeaderButton>
       <HeaderButton title="Expand" onClick={onExpand}>
-        <MinusIcon size={16} />
+        <ExpandIcon size={14} />
       </HeaderButton>
-      <HeaderButton title="Hide (Esc). The hotkey brings it back." onClick={() => api.hide()}>
-        <CloseIcon size={16} />
-      </HeaderButton>
+      <SettingsButton open={menuOpen} onClick={onToggleMenu} />
     </div>
+  )
+}
+
+function SettingsButton({ open, onClick }: { open: boolean; onClick: () => void }) {
+  return (
+    <HeaderButton title="Settings" onClick={onClick} aria-expanded={open} className={open ? 'bg-zinc-900/5 text-zinc-900 dark:bg-white/10 dark:text-white' : undefined}>
+      <GearIcon size={15} />
+    </HeaderButton>
+  )
+}
+
+/** Settings, right under the top bar (the window grows to fit): transparency, a new session, quit. */
+export function SettingsMenu({
+  glass,
+  onGlass,
+  onNewSession,
+  onClose
+}: {
+  glass: Glass
+  onGlass: (g: Glass) => void
+  onNewSession: () => void
+  onClose: () => void
+}) {
+  const row =
+    'no-drag flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] text-zinc-700 hover:bg-zinc-900/5 dark:text-zinc-200 dark:hover:bg-white/10'
+  return (
+    <>
+      <div className="no-drag fixed inset-0 z-10" onClick={onClose} />
+      <div className="relative z-20 border-b border-zinc-900/10 p-1 dark:border-white/10">
+        <button type="button" onClick={() => onGlass(NEXT_GLASS[glass])} className={row} title="Click to change how see-through the panel is">
+          <LayersIcon size={14} className="shrink-0 text-zinc-500 dark:text-zinc-400" />
+          Transparency
+          <span className="ml-auto capitalize text-zinc-400">{glass}</span>
+        </button>
+        <button type="button" onClick={onNewSession} className={row} title="Start over: clears the problem and any Ask">
+          <PlusIcon size={14} className="shrink-0 text-zinc-500 dark:text-zinc-400" />
+          New session
+        </button>
+        <button
+          type="button"
+          onClick={() => api.quit()}
+          className={cx(row, 'text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/10')}
+        >
+          <PowerIcon size={14} className="shrink-0" /> Quit Clueless
+        </button>
+      </div>
+    </>
   )
 }
 

@@ -1,51 +1,42 @@
 import { MotionConfig } from 'motion/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { AppStatus, SessionView, StageShow, WindowMode } from '../../shared/contracts'
-import { api, isMock } from './api'
-import { mock as islandMock } from './island/api'
+import type { AppStatus, SessionView, WindowMode } from '../../shared/contracts'
+import { api } from './api'
+import { islandApi } from './island/api'
 import { AskCard } from './island/AskCard'
-import { useNarration } from './island/useNarration'
-import { AskButton, IslandScreen, useIslandView } from './island/IslandScreen'
-import { MockPage } from './island/MockPage'
+import { useAnswerReadAloud } from './island/useNarration'
+import { IslandScreen, SelectionButtons, useIslandView } from './island/IslandScreen'
+import { VisualIsland } from './island/VisualIsland'
 import { AreaSelector } from './screens/AreaSelector'
-import { Banners, CompactBar, EmptyState, GLASS_ALPHA, Header, type Glass } from './screens/Home'
+import { Banners, CompactBar, EmptyState, GLASS_ALPHA, Header, SettingsMenu, type Glass } from './screens/Home'
 import { GapsScreen } from './screens/Gaps'
 import { SessionScreen, type ComposerMode } from './screens/Session'
 import { VoiceStrip } from './components/MicButton'
 import { useVoiceConversation } from './voice/useVoiceConversation'
 import { AnimationPane } from './visuals/AnimationPane'
-import { CodeOverlay, StageScreen } from './visuals/CodeOverlay'
+import { StageScreen } from './visuals/CodeOverlay'
 import { PlaybackContext, playsOnCode, type Playback, type Playing } from './visuals/playback'
 import { speech } from './voice/speaker'
 import { toSpeech } from '../../shared/speechText'
 
 // One renderer, several windows, picked by the URL hash:
-//   (none)   the tutor panel        #select  drag a box around the problem
-//   #stage   animations drawn over the student's code (the tutor's, and Ask's step-by-step runs)
-//   #island  the island's pill   #ask  the Ask button next to the cursor
-// In a plain browser (`npm run ui`) the panel runs on mock data; add `?island` for the island demo.
+//   (none)   the tutor panel           #select  drag a box around the problem
+//   #stage   drawn over the student's screen (the tutor's code animations, Animate's line highlight)
+//   #island  the island's pill         #ask     the Ask / Animate buttons next to the cursor
+//   #visual  the visual island: an Animate run's picture, voice and controls
 export function App() {
   const hash = window.location.hash
   if (hash === '#select') return <AreaSelector />
   if (hash === '#ask') {
     return (
       <div className="flex h-full items-start p-1.5">
-        <AskButton />
+        <SelectionButtons />
       </div>
     )
   }
-  const islandDemo = new URLSearchParams(window.location.search).has('island') ? islandMock : null
   return (
     <MotionConfig reducedMotion="user">
-      {hash === '#stage' ? (
-        <StageScreen />
-      ) : hash === '#island' ? (
-        <IslandScreen />
-      ) : islandDemo ? (
-        <MockPage mock={islandDemo} />
-      ) : (
-        <Overlay />
-      )}
+      {hash === '#stage' ? <StageScreen /> : hash === '#island' ? <IslandScreen /> : hash === '#visual' ? <VisualIsland /> : <Overlay />}
     </MotionConfig>
   )
 }
@@ -64,19 +55,16 @@ function Overlay() {
   const [glass, setGlass] = useState<Glass>(loadGlass)
   const [size, setSize] = useState<PanelSize>(loadSize)
   const [playing, setPlaying] = useState<Playing | null>(null)
-  const [mockStage, setMockStage] = useState<StageShow | null>(null)
+  const [menu, setMenu] = useState(false)
   const islandView = useIslandView()
   const asking = Boolean(islandView && islandView.phase !== 'idle')
-  useNarration(islandView)
+  useAnswerReadAloud(islandView)
 
   useEffect(() => {
-    if (isMock) document.body.classList.add('mock-desktop')
     void api.getStatus().then(setStatus)
     void api.getSession().then(setSession)
     const offSession = api.onSession(setSession)
     const offStatus = api.onStatus(setStatus)
-    // Browser mock mode has no stage window: draw code-mode animations in this page instead.
-    const offStage = isMock ? api.onStage(setMockStage) : () => {}
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') api.hide()
     }
@@ -84,7 +72,6 @@ function Overlay() {
     return () => {
       offSession()
       offStatus()
-      offStage()
       window.removeEventListener('keydown', onKey)
     }
   }, [])
@@ -142,7 +129,28 @@ function Overlay() {
     setCompact(next)
     api.setWindowMode(windowMode(next, playing))
   }
-  const toggleCompact = (): void => setCompactMode(!compact)
+  const toggleCompact = (): void => {
+    setMenu(false)
+    setCompactMode(!compact)
+  }
+
+  // Settings → New session: drop the problem and any Ask, back to the start.
+  const newSession = (): void => {
+    setMenu(false)
+    speech.stop()
+    islandApi.close()
+    api.action('new')
+    setScreen('main')
+  }
+
+  // The small window's box: a follow-up to an Ask, an answer to the tutor, or (with nothing
+  // started yet) the problem itself. The big window opens to show the reply.
+  const submitText = (text: string): void => {
+    if (islandView?.phase === 'answer' && !islandView.error) islandApi.followUp(text)
+    else if (session?.problem) api.send({ text, as: 'text' })
+    else api.askText(text)
+    if (compact) setCompactMode(false)
+  }
 
   // Voice lives here, not in the session screen, so the compact pill can talk too.
   // What you say is sent exactly like a typed answer; with no problem yet, it becomes the problem.
@@ -165,7 +173,7 @@ function Overlay() {
   const panel = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const el = panel.current
-    if (!el || isMock) return
+    if (!el) return
     let frame = 0
     const observer = new ResizeObserver(() => {
       cancelAnimationFrame(frame)
@@ -180,7 +188,7 @@ function Overlay() {
 
   // A saved width from last time: apply it once the window exists.
   useEffect(() => {
-    if (!isMock && size.width) api.resizeWidth(size.width, 'right')
+    if (size.width) api.resizeWidth(size.width, 'right')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -207,8 +215,7 @@ function Overlay() {
 
   return (
     <PlaybackContext.Provider value={playback}>
-    <div className={isMock ? 'flex h-full items-start justify-end p-6' : 'relative p-2'} data-app-ready>
-      {isMock && <MockDesktop />}
+    <div className="relative p-2" data-app-ready>
       <div
         ref={panel}
         className={
@@ -219,7 +226,7 @@ function Overlay() {
           (glass === 'clear' ? 'glass-clear ' : '') +
           // Code mode: the panel turns see-through so the animation on the code is the focus.
           (onCode ? 'opacity-40 transition-opacity duration-300 hover:opacity-100 ' : '') +
-          (isMock ? (compact ? 'w-[252px]' : explain ? 'w-[844px]' : 'w-[400px]') : 'w-full')
+          'w-full'
         }
         style={
           {
@@ -232,22 +239,32 @@ function Overlay() {
       >
         {compact ? (
           <>
-            <CompactBar conv={conv} busy={Boolean(session?.busy)} onExpand={toggleCompact} />
-            {/* Talking from the pill: your words appear right under it. */}
+            <CompactBar
+              conv={conv}
+              busy={Boolean(session?.busy)}
+              menuOpen={menu}
+              onToggleMenu={() => setMenu(!menu)}
+              onExpand={toggleCompact}
+              onSubmit={submitText}
+            />
+            {/* Talking from the small window: your words appear right under it. */}
             <div className="px-2 empty:hidden">
               <VoiceStrip voice={conv.input} onDismiss={conv.input.cancel} />
             </div>
           </>
         ) : (
           <Header
-            compact={compact}
             stuck={session?.stuck ?? null}
-            glass={glass}
-            onGlass={changeGlass}
-            onToggleCompact={toggleCompact}
-            onOpenGaps={() => setScreen('gaps')}
+            menuOpen={menu}
+            onToggleMenu={() => setMenu(!menu)}
+            onShrink={toggleCompact}
+            onOpenGaps={() => {
+              setMenu(false)
+              setScreen('gaps')
+            }}
           />
         )}
+        {menu && <SettingsMenu glass={glass} onGlass={changeGlass} onNewSession={newSession} onClose={() => setMenu(false)} />}
         {!compact && (
           <>
             <Banners status={status} />
@@ -275,8 +292,7 @@ function Overlay() {
           </>
         )}
       </div>
-      {!isMock && !compact && <ResizeGrips panel={panel} size={size} onSize={changeSize} />}
-      {isMock && mockStage && <CodeOverlay show={mockStage} />}
+      {!compact && <ResizeGrips panel={panel} size={size} onSize={changeSize} />}
     </div>
     </PlaybackContext.Provider>
   )
@@ -391,35 +407,4 @@ function loadGlass(): Glass {
     // storage unavailable: use the default
   }
   return 'glass'
-}
-
-/** Browser mock mode only: a fake code editor behind the panel, to show the glass effect. */
-function MockDesktop() {
-  return (
-    <pre className="pointer-events-none fixed inset-0 overflow-hidden p-10 font-mono text-[15px] leading-7 text-sky-200/80">
-      {`class Solution:
-    def isValidSudoku(self, board: List[List[str]]) -> bool:
-        rows = [set() for _ in range(9)]
-        cols = [set() for _ in range(9)]
-        boxes = [set() for _ in range(9)]
-
-        for r in range(9):
-            for c in range(9):
-                val = board[r][c]
-                if val == '.':
-                    continue
-                b = (r // 3) * 3 + c // 3
-                if val in rows[r] or val in cols[c] or val in boxes[b]:
-                    return False
-                rows[r].add(val)
-                cols[c].add(val)
-                boxes[b].add(val)
-        return True
-
-# 36. Valid Sudoku (Medium)
-# Determine if a 9 x 9 Sudoku board is valid. Only the filled cells need to be
-# validated: each row, each column and each 3 x 3 sub-box must contain the
-# digits 1-9 without repetition.`}
-    </pre>
-  )
 }

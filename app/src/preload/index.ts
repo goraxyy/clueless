@@ -45,22 +45,24 @@ const api: CluelessApi = {
 
 contextBridge.exposeInMainWorld('clueless', api)
 
-// The island: the pill, the Ask button, and the panel's Ask card.
+// The island: the pill, the Ask / Animate buttons, the panel's Ask card and the visual island.
 const island: IslandApi = {
   getView: () => ipcRenderer.invoke(ISLAND_IPC.getView),
   onView: (cb) => listen(ISLAND_IPC.view, cb),
-  setAnimate: (on) => ipcRenderer.send(ISLAND_IPC.setAnimate, on),
   setAskOnHighlight: (on) => ipcRenderer.send(ISLAND_IPC.setAskOnHighlight, on),
   followUp: (text) => ipcRenderer.send(ISLAND_IPC.followUp, text),
   close: () => ipcRenderer.send(ISLAND_IPC.close),
   hide: () => ipcRenderer.send(ISLAND_IPC.hide),
   resize: (size) => ipcRenderer.send(ISLAND_IPC.resize, size),
-  ask: () => ipcRenderer.send(ISLAND_IPC.ask),
+  resizeVisual: (size) => ipcRenderer.send(ISLAND_IPC.resizeVisual, size),
+  ask: (animate) => ipcRenderer.send(ISLAND_IPC.ask, { animate }),
   play: () => ipcRenderer.send(ISLAND_IPC.play),
   pause: () => ipcRenderer.send(ISLAND_IPC.pause),
   step: (delta) => ipcRenderer.send(ISLAND_IPC.step, delta),
   replay: () => ipcRenderer.send(ISLAND_IPC.replay),
   stop: () => ipcRenderer.send(ISLAND_IPC.stop),
+  setSpeed: (speed) => ipcRenderer.send(ISLAND_IPC.speed, speed),
+  setVoice: (on) => ipcRenderer.send(ISLAND_IPC.voice, on),
   stepDone: (nonce, index) => ipcRenderer.send(ISLAND_IPC.stepDone, { nonce, index }),
   setNarrated: (on) => ipcRenderer.send(ISLAND_IPC.narrated, on)
 }

@@ -36,7 +36,8 @@ describe('fromTraceWire', () => {
       { line: 2, endLine: 0, focus: 'n > 0', kind: 'condition', result: 'true', reads: ['n', 'ghost'], updates: [] },
       { line: 99, endLine: 99, focus: 'not on the line', kind: 'assign', result: '', reads: [], updates: [{ entity: 'ghost', value: value() }] }
     ],
-    run: { setup: '', call: '' }
+    run: { setup: '', call: '' },
+    lesson: []
   }
 
   it('keeps steps on real lines and drops unknown entities', () => {
@@ -50,5 +51,36 @@ describe('fromTraceWire', () => {
   it('has no trace when there are no steps (Animate off, or not code)', () => {
     expect(fromTraceWire({ ...wire, steps: [] }, code).trace).toBeNull()
     expect(fromTraceWire({ ...wire, entities: [] }, code).trace).toBeNull()
+  })
+
+  it('a lesson (not code): keeps steps that say something, on real lines or none', () => {
+    const text = 'A ball is thrown up at 10 m/s.\nHow high does it go?'
+    const scene = { type: 'numberline' as const, min: 0, max: 10, marks: [] }
+    const { trace, lesson } = fromTraceWire(
+      {
+        ...wire,
+        entities: [],
+        steps: [],
+        lesson: [
+          { line: 1, endLine: 9, say: ' It starts fast. ', scene },
+          { line: 0, endLine: 0, say: 'Gravity slows it down.', scene },
+          { line: 2, endLine: 2, say: '  ', scene }
+        ]
+      },
+      text
+    )
+    expect(trace).toBeNull()
+    expect(lesson).toEqual({
+      text,
+      steps: [
+        { line: 1, endLine: 2, say: 'It starts fast.', scene },
+        { line: null, endLine: null, say: 'Gravity slows it down.', scene }
+      ]
+    })
+  })
+
+  it('a trace wins over a lesson', () => {
+    const scene = { type: 'numberline' as const, min: 0, max: 1, marks: [] }
+    expect(fromTraceWire({ ...wire, lesson: [{ line: 1, endLine: 1, say: 'x', scene }] }, code).lesson).toBeNull()
   })
 })

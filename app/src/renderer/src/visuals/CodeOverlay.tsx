@@ -7,14 +7,14 @@ import type { StageIsland, StageShow } from '../../../shared/contracts'
 import { api } from '../api'
 import { TraceStage } from '../island/TraceStage'
 import { FrameDots } from './AnimationPane'
-import { arrowPath, placeCard } from './layout'
+import { arrowPath, placeCard } from '../../../shared/layout'
 import { SceneView } from './SceneView'
 import { useFramePlayer } from './useFramePlayer'
 
 const SPRING = { type: 'spring', stiffness: 260, damping: 30 } as const
 const clamp01 = (v: number): number => Math.max(0, Math.min(1, v))
 
-/** The stage window's whole page (#stage): the tutor's visual over the code, or Ask's step-by-step run. */
+/** The stage window's whole page (#stage): the tutor's visual over the code, or an Animate run's line highlight. */
 export function StageScreen() {
   const [show, setShow] = useState<StageShow | null>(null)
   const [island, setIsland] = useState<StageIsland | null>(null)
@@ -23,7 +23,7 @@ export function StageScreen() {
   return (
     <>
       {show && <CodeOverlay show={show} />}
-      {island?.view && <TraceStage view={island.view} avoid={island.avoid} />}
+      {island?.view && <TraceStage view={island.view} island={island.island} />}
     </>
   )
 }

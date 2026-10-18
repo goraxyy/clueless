@@ -1,8 +1,9 @@
 // Clueless main process: windows, hotkeys, screen capture and IPC.
 // Two ways in:
 //   - the tutor panel (the main app): Ctrl/Cmd+Shift+Space reads the screen, +2 selects an area, +1 voice
-//   - the island (Ctrl/Cmd+Shift+3): highlight code anywhere, click Ask: the answer shows in the
-//     panel and, with Animate on, the code runs step by step right on top of it
+//   - the island (Ctrl/Cmd+Shift+3): highlight anything, click Ask or Animate. The answer shows in
+//     the panel; Animate also plays it step by step in the visual island (its own window, with a
+//     voice) while the line it's on lights up on the student's screen
 import {
   app,
   BrowserWindow,
@@ -32,7 +33,8 @@ import {
   type StepIntent,
   type Subject,
   type UserAction,
-  type WindowMode
+  type WindowMode,
+  stepCount
 } from '../shared/contracts'
 import { IslandController, type IslandCapture } from '../shared/islandController'
 import { normalizeSnippet } from '../shared/trace'
@@ -63,10 +65,13 @@ import {
   createIsland,
   createOverlay,
   createStage,
+  createVisualIsland,
   fitPanelHeight,
   placeAskButton,
   placeIsland,
+  placeVisualIsland,
   resizePanelWidth,
+  resizeVisualIsland,
   resolveAreaSelection,
   selectArea,
   setPanelMode
@@ -84,6 +89,10 @@ let stageLoaded = false
 let stageShow: StageShow | null = null
 let island: BrowserWindow | null = null
 let askButton: BrowserWindow | null = null
+let visual: BrowserWindow | null = null // the visual island: an Animate run's picture, voice and controls
+let visualSize = { width: 460, height: 320 } // what the visual island measured itself at
+/** none = hidden · guess = placed before it measured itself · fixed = placed (or dragged) for good */
+let visualPlaced: 'none' | 'guess' | 'fixed' = 'none'
 let islandDisplay: Display
 let pillSize = { width: 320, height: 64 } // what the pill measured itself at
 let islandView: IslandView | null = null // the latest, for the stage
@@ -144,7 +153,7 @@ function toggleOverlay(): void {
 
 /** Clueless's own windows that are on screen right now. */
 function ownVisibleWindows(): BrowserWindow[] {
-  return [overlay, stage, island, askButton].filter((w): w is BrowserWindow => Boolean(w && !w.isDestroyed() && w.isVisible()))
+  return [overlay, stage, island, askButton, visual].filter((w): w is BrowserWindow => Boolean(w && !w.isDestroyed() && w.isVisible()))
 }
 
 /** Hide Clueless's own windows (without losing their place) while the screen is captured. */
@@ -223,16 +232,22 @@ function panelOn(display: Display): Rect | null {
   return panel && { x: panel.x - display.bounds.x, y: panel.y - display.bounds.y, width: panel.width, height: panel.height }
 }
 
+/** Where the visual island is on `display` (display-local), for the arrow from the code to it. */
+function visualOn(display: Display): Rect | null {
+  const b = visual && !visual.isDestroyed() && visual.isVisible() ? visual.getBounds() : null
+  return b && { x: b.x - display.bounds.x, y: b.y - display.bounds.y, width: b.width, height: b.height }
+}
+
 function sendStage(): void {
   if (!stage || stage.isDestroyed() || !stageLoaded) return
   stage.webContents.send(IPC.stageShow, stageShow)
   const display = islandView?.spot ? displayById(islandView.spot.displayId) : null
-  stage.webContents.send(IPC.stageIsland, { view: islandView, avoid: display ? panelOn(display) : null })
+  stage.webContents.send(IPC.stageIsland, { view: islandView, island: display ? visualOn(display) : null })
 }
 
-/** The stage is up while the tutor plays a visual over the code, or the island animates a highlight. */
+/** The stage is up while the tutor plays a visual over the code, or an Animate run highlights the code. */
 function updateStage(): void {
-  const islandDrawing = Boolean(islandView?.playback && islandView.trace && islandView.spot)
+  const islandDrawing = Boolean(islandView?.playback && islandView.spot && !islandView.spotLost && stepCount(islandView))
   const display = stageShow ? displayById(stageShow.area.displayId) : islandDrawing ? displayById(islandView!.spot!.displayId) : null
   if (!display) {
     sendStage()
@@ -309,7 +324,7 @@ function openScreenSettings(): void {
   }
 }
 
-// ---------- the island: highlight code -> Ask -> text, then the step-by-step animation ----------
+// ---------- the island: highlight -> Ask or Animate -> text, and the step-by-step animation ----------
 
 let runner: PythonRunner | null = null
 
@@ -330,9 +345,10 @@ const islandController = new IslandController({
   emit: (view) => {
     const asked = view.phase !== 'idle' && (islandView?.phase ?? 'idle') === 'idle'
     islandView = view
-    for (const w of [island, overlay]) if (w && !w.isDestroyed()) w.webContents.send(ISLAND_IPC.view, view)
+    for (const w of [island, overlay, visual]) if (w && !w.isDestroyed()) w.webContents.send(ISLAND_IPC.view, view)
     // The answer shows in the panel: bring it up, without taking focus from the student's app.
     if (asked && overlay && !overlay.isVisible()) overlay.showInactive()
+    updateVisual()
     updateStage()
   },
   schedule: (fn, ms) => {
@@ -344,6 +360,30 @@ const islandController = new IslandController({
 
 function placePill(): void {
   if (island && !island.isDestroyed()) placeIsland(island, islandDisplay, pillSize)
+}
+
+/** The visual island is up while an Animate run's animation is: placed beside the code once, then
+ *  it stays where it is (or where the student dragged it). */
+function updateVisual(): void {
+  if (!visual || visual.isDestroyed()) return
+  const view = islandView
+  if (!view?.playback || !stepCount(view)) {
+    visualPlaced = 'none'
+    if (visual.isVisible()) visual.hide()
+    return
+  }
+  if (visualPlaced === 'none') {
+    placeVisual()
+    visualPlaced = 'guess'
+  }
+  if (!SMOKE && !visual.isVisible()) visual.showInactive() // the student's app keeps the focus
+}
+
+function placeVisual(): void {
+  if (!visual || visual.isDestroyed()) return
+  const spot = islandView?.spot ?? null
+  const display = spot ? displayById(spot.displayId) : islandDisplay
+  placeVisualIsland(visual, display, visualSize, spot, panelOn(display))
 }
 
 /** A screenshot of the display the student is working on (Clueless's own windows hidden), and
@@ -389,7 +429,7 @@ function findSpot(selection: { from: Point; to: Point }, snippet: string, displa
 
 const watcher = new SelectionWatcher({
   isOwnWindowAt: (p) =>
-    [overlay, island, askButton].some((w) => w && !w.isDestroyed() && w.isVisible() && contains(w.getBounds(), p)),
+    [overlay, island, askButton, visual].some((w) => w && !w.isDestroyed() && w.isVisible() && contains(w.getBounds(), p)),
   paused: () => !askOnHighlight,
   onSelection: (text, at, from) => {
     pendingSelection = { text, from, to: at }
@@ -424,14 +464,15 @@ function hideAskButton(): void {
   if (askButton && !askButton.isDestroyed()) askButton.hide()
 }
 
-function onIslandAsk(): void {
+/** Ask (explain it) or Animate (explain it with an animation and a voice) was clicked next to a highlight. */
+function onIslandAsk(animate: boolean): void {
   const selection = pendingSelection
   const at = askButton?.getBounds()
   hideAskButton()
   if (!selection) return
   if (at) islandDisplay = screen.getDisplayMatching(at)
   askedSelection = selection
-  void islandController.ask(selection.text)
+  void islandController.ask(selection.text, animate)
 }
 
 function showIsland(): void {
@@ -550,7 +591,6 @@ function setup(): void {
   ipcMain.on(IPC.stageStop, () => stopOnScreen())
 
   ipcMain.handle(ISLAND_IPC.getView, () => islandController.current)
-  ipcMain.on(ISLAND_IPC.setAnimate, (_e, on: unknown) => islandController.setAnimate(Boolean(on)))
   ipcMain.on(ISLAND_IPC.setAskOnHighlight, (_e, on: unknown) => {
     askOnHighlight = Boolean(on)
     if (!askOnHighlight) hideAskButton()
@@ -561,7 +601,7 @@ function setup(): void {
   })
   ipcMain.on(ISLAND_IPC.close, () => islandController.close())
   ipcMain.on(ISLAND_IPC.hide, () => hideIsland())
-  ipcMain.on(ISLAND_IPC.ask, () => onIslandAsk())
+  ipcMain.on(ISLAND_IPC.ask, (_e, arg: { animate?: unknown }) => onIslandAsk(Boolean(arg?.animate)))
   ipcMain.on(ISLAND_IPC.play, () => islandController.play())
   ipcMain.on(ISLAND_IPC.pause, () => islandController.pause())
   ipcMain.on(ISLAND_IPC.step, (_e, delta: unknown) => {
@@ -569,6 +609,10 @@ function setup(): void {
   })
   ipcMain.on(ISLAND_IPC.replay, () => islandController.replay())
   ipcMain.on(ISLAND_IPC.stop, () => islandController.stopPlayback())
+  ipcMain.on(ISLAND_IPC.speed, (_e, speed: unknown) => {
+    if (typeof speed === 'number') islandController.setSpeed(speed)
+  })
+  ipcMain.on(ISLAND_IPC.voice, (_e, on: unknown) => islandController.setVoice(Boolean(on)))
   ipcMain.on(ISLAND_IPC.stepDone, (_e, arg: { nonce?: unknown; index?: unknown }) => {
     if (typeof arg?.nonce === 'number' && typeof arg.index === 'number') islandController.stepDone(arg.nonce, arg.index)
   })
@@ -577,6 +621,18 @@ function setup(): void {
     if (!Number.isFinite(size?.width) || !Number.isFinite(size?.height) || size.width < 1 || size.height < 1) return
     pillSize = { width: size.width, height: size.height }
     placePill()
+  })
+  ipcMain.on(ISLAND_IPC.resizeVisual, (_e, size: { width: number; height: number }) => {
+    if (!Number.isFinite(size?.width) || !Number.isFinite(size?.height) || size.width < 1 || size.height < 1) return
+    visualSize = { width: size.width, height: size.height }
+    if (!visual || visual.isDestroyed() || visualPlaced === 'none') return
+    if (visualPlaced === 'guess') {
+      placeVisual() // now that its real size is known
+      visualPlaced = 'fixed'
+    } else {
+      resizeVisualIsland(visual, visualSize)
+    }
+    sendStage()
   })
   ipcMain.handle(IPC.voiceMicAccess, async () => {
     // macOS asks the student once; Windows uses its own privacy setting and Chromium handles it.
@@ -614,6 +670,10 @@ function setup(): void {
   island = createIsland()
   island.on('closed', () => (island = null))
   askButton = createAskButton()
+  visual = createVisualIsland()
+  visual.on('closed', () => (visual = null))
+  visual.on('will-move', () => (visualPlaced = 'fixed')) // the student dragged it: leave it there
+  visual.on('move', () => sendStage()) // the arrow from the code follows it
 
   keepAlive.push(createTray({
     ask: () => void ask('screen'),
@@ -626,7 +686,7 @@ function setup(): void {
 
   if (SMOKE) {
     // `CLUELESS_SMOKE=1 npm start`: load the panel and the island hidden, check both rendered, run
-    // a little Python in the worker, have the (hidden) stage draw that run, then quit.
+    // a little Python in the worker, have the (hidden) stage and visual island draw that run, then quit.
     overlay.webContents.once('did-finish-load', async () => {
       await sleep(2500)
       const ready = 'Boolean(document.querySelector("[data-app-ready]"))'
@@ -641,14 +701,18 @@ function setup(): void {
       islandView = {
         ...islandController.current,
         phase: 'answer',
+        animate: true,
         trace,
         spot: { displayId: activeDisplay().id, left: 200, width: 300, top: 200, lineHeight: 22, lines: 2 },
         playback: { nonce: 1, index: 0, playing: false }
       }
+      visual?.webContents.send(ISLAND_IPC.view, islandView)
+      updateVisual()
       updateStage()
       await sleep(2000)
       const stageOk = await stage?.webContents.executeJavaScript('Boolean(document.querySelector("[data-trace-stage]"))')
-      const parts = { panel: panelOk, island: islandOk, python: pythonOk, stage: stageOk }
+      const visualOk = await visual?.webContents.executeJavaScript('Boolean(document.querySelector("[data-visual-island]"))')
+      const parts = { panel: panelOk, island: islandOk, python: pythonOk, stage: stageOk, visual: visualOk }
       const ok = Object.values(parts).every(Boolean)
       const failed = Object.entries(parts).filter(([, v]) => !v).map(([k]) => k)
       console.log(ok ? 'SMOKE OK' : `SMOKE FAIL: ${failed.join(', ')} did not work`)

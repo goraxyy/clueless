@@ -1,8 +1,9 @@
-// "Ask" on highlighted text: one conversation per highlight.
-// - Animate off, or not code: the fast model (Haiku) explains it.
-// - Animate on, Python: the fast model picks an input and how to call the code, and the app runs
+// Ask or Animate on highlighted text: one conversation per highlight.
+// - Ask: the fast model (Haiku) explains it.
+// - Animate, Python: the fast model picks an input and how to call the code, and the app runs
 //   it for real (src/main/run) to get every step. If the run can't start, Claude writes the trace.
-// - Animate on, other languages: the tutor model (Sonnet) writes the step-by-step trace.
+// - Animate, other languages: the tutor model (Sonnet) writes the step-by-step trace.
+// - Animate, not code: the tutor model writes a concept lesson (a picture and a line per step).
 // No Electron imports, so scripts/try-trace.mts and the tests use it directly.
 import Anthropic, { BetaFallbackState } from '@anthropic-ai/sdk'
 import type {
@@ -238,7 +239,7 @@ export class Tracer implements TracerLike {
     if (animate && this.runner && looksLikePython(this.code)) {
       const wire = await conv.request({ text: `[ANIMATE ON] [RUN] [FOLLOW-UP] ${text}` }, 'low')
       const wantsRun = Boolean(wire.run.setup.trim() || wire.run.call.trim())
-      return (wantsRun && (await this.runPlan(wire))) || { message: wire.message.trim(), trace: null }
+      return (wantsRun && (await this.runPlan(wire))) || { message: wire.message.trim(), trace: null, lesson: null }
     }
     const effort = animate && conv.transport === this.models.tutor ? this.effortFor(this.code) : 'low'
     return fromTraceWire(await conv.request({ text: `${animate ? '[ANIMATE ON]' : '[ANIMATE OFF]'} [FOLLOW-UP] ${text}` }, effort), this.code)
@@ -260,7 +261,7 @@ export class Tracer implements TracerLike {
       if (trace) {
         const notes = [run.stopped && `stopped at the ${run.stopped} limit`, run.error].filter(Boolean).join(', ')
         this.log(`run: ${trace.steps.length} steps${notes ? ` (${notes})` : ''}`)
-        return { message: wire.message.trim(), trace }
+        return { message: wire.message.trim(), trace, lesson: null }
       }
       why = run.setupError || run.error || 'nothing in the highlighted code ran'
     } catch (err) {

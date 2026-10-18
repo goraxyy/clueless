@@ -2,7 +2,7 @@
 // Type-only imports from ./schema, so the UI bundle doesn't pull in zod.
 import type { z } from 'zod'
 import type * as S from './schema'
-import type { CodeTrace } from './trace'
+import type { CodeTrace, Lesson } from './trace'
 
 export type Subject = z.infer<typeof S.Subject>
 export type GapType = z.infer<typeof S.GapType>
@@ -101,10 +101,11 @@ export interface StageShow extends StagePlay {
   avoid: Rect | null
 }
 
-/** main -> stage window: the island's animation over a highlight (drawn while view.playback is set). */
+/** main -> stage window: the highlight on the student's code while an Animate run plays
+ *  (drawn while view.playback is set). `island` is the visual island window, for the arrow. */
 export interface StageIsland {
   view: IslandView | null
-  avoid: Rect | null
+  island: Rect | null // in the same display coordinates as view.spot
 }
 
 export interface CheckResult {
@@ -315,7 +316,7 @@ export interface CluelessApi {
   onStageIsland(cb: (show: StageIsland) => void): () => void
 }
 
-// ---------- the island: highlight -> Ask -> text in the panel, the animation on the code itself ----------
+// ---------- the island: highlight -> Ask or Animate -> text in the panel, the animation in the visual island ----------
 
 /** idle = nothing asked · thinking = waiting for Claude · answer = the reply is in the panel. */
 export type IslandPhase = 'idle' | 'thinking' | 'answer'
@@ -335,62 +336,79 @@ export interface CodeSpot {
   lines: number
 }
 
-/** The animation drawn over the student's code. */
+/** The animation: in the visual island, and highlighted on the student's code. */
 export interface IslandPlayback {
   nonce: number // new on every (re)play
   index: number // the step on screen; -1 = the short intro before step 1
   playing: boolean // false = paused, or finished on the last step
 }
 
+/** Animation speeds the visual island's speed button goes through. */
+export const SPEEDS = [0.5, 1, 1.5, 2] as const
+
 export interface IslandView {
-  askOnHighlight: boolean // the pill's switch: show Ask after a highlight
-  animate: boolean // the pill's switch: animate code answers
+  askOnHighlight: boolean // the pill's switch: show Ask / Animate after a highlight
+  animate: boolean // this conversation was started with Animate (its follow-ups animate too)
   phase: IslandPhase
   snippet: string | null // the highlighted text being discussed
   messages: IslandMessage[]
-  trace: CodeTrace | null // the latest reply's trace (kept for Replay)
+  trace: CodeTrace | null // the latest reply's code trace (kept for Replay)
+  lesson: Lesson | null // or its concept animation, when the highlight isn't code
   spot: CodeSpot | null // where the highlight is on screen
-  playback: IslandPlayback | null // set while the animation is on screen
+  spotLost: boolean // the page scrolled: the highlight on the code is hidden, the island plays on
+  playback: IslandPlayback | null // set while the animation is up
+  speed: number // one of SPEEDS
+  voice: boolean // the visual island reads each step aloud, and the animation waits for it
   busySince: number | null // when the current Claude call started
   error: string | null
-  notice: string | null // e.g. why the animation stopped
+  notice: string | null // e.g. why the highlight on the code went away
+}
+
+/** How many steps the latest answer's animation has (a code trace or a lesson). */
+export function stepCount(view: Pick<IslandView, 'trace' | 'lesson'>): number {
+  return view.trace?.steps.length ?? view.lesson?.steps.length ?? 0
 }
 
 export const ISLAND_IPC = {
   view: 'island:view', // main -> UI: IslandView
   getView: 'island:get-view', // invoke
-  setAnimate: 'island:animate', // boolean
   setAskOnHighlight: 'island:ask-on-highlight', // boolean
   followUp: 'island:follow-up', // string
   close: 'island:close', // close the Ask card (and the animation)
   hide: 'island:hide',
   resize: 'island:resize', // { width, height } of the pill
-  ask: 'island:ask', // the Ask button next to the cursor was clicked
+  resizeVisual: 'island:resize-visual', // { width, height } of the visual island
+  ask: 'island:ask', // { animate }: Ask or Animate next to the cursor was clicked
   play: 'island:play',
   pause: 'island:pause',
   step: 'island:step', // number: -1 back, +1 forward
   replay: 'island:replay',
   stop: 'island:stop', // take the animation off the screen
-  stepDone: 'island:step-done', // { nonce, index }: the panel finished reading this step aloud
-  narrated: 'island:narrated' // boolean: the panel reads steps aloud (voice on)
+  speed: 'island:speed', // number: one of SPEEDS
+  voice: 'island:voice', // boolean: read the steps aloud
+  stepDone: 'island:step-done', // { nonce, index }: the visual island finished reading this step aloud
+  narrated: 'island:narrated' // boolean: the visual island is reading steps aloud
 } as const
 
-/** The API the preload script exposes as `window.island` (the pill, the Ask button, the panel's Ask card, the stage). */
+/** The API the preload script exposes as `window.island` (the pill, the Ask / Animate buttons,
+ *  the panel's Ask card, the visual island and the stage). */
 export interface IslandApi {
   getView(): Promise<IslandView>
   onView(cb: (view: IslandView) => void): () => void
-  setAnimate(on: boolean): void
   setAskOnHighlight(on: boolean): void
   followUp(text: string): void
   close(): void
   hide(): void
   resize(size: { width: number; height: number }): void
-  ask(): void
+  resizeVisual(size: { width: number; height: number }): void
+  ask(animate: boolean): void
   play(): void
   pause(): void
   step(delta: number): void
   replay(): void
   stop(): void
+  setSpeed(speed: number): void
+  setVoice(on: boolean): void
   stepDone(nonce: number, index: number): void
   setNarrated(on: boolean): void
 }

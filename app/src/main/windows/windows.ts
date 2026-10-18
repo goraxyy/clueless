@@ -1,14 +1,15 @@
-// The floating overlay panel and the full-screen "select an area" window.
+// The floating overlay panel, the island's windows and the full-screen "select an area" window.
 import { app, BrowserWindow, screen, shell, type Display } from 'electron'
 import { join } from 'node:path'
-import type { Rect, WindowMode } from '../../shared/contracts'
+import type { CodeSpot, Rect, WindowMode } from '../../shared/contracts'
+import { placeCard } from '../../shared/layout'
 
 /** The window wraps the panel (plus an 8px margin for its shadow) and follows its height. */
 export const PANEL_WIDTH = 416
 /** Explain mode ('wide'): the animation pane sits next to the conversation. */
 export const WIDE_WIDTH = 860
-/** Compact ('compact'): just the pill bar (logo, name, mic, expand, hide), plus the margin. */
-export const PILL_WIDTH = 252 + 16
+/** Compact ('compact'): just the small bar (logo, a box to type in, mic, voice, expand, settings), plus the margin. */
+export const PILL_WIDTH = 348 + 16
 const MIN_WIDTH = 320
 const MAX_WIDTH = 960
 const MARGIN = 16
@@ -228,9 +229,9 @@ export function placeIsland(win: BrowserWindow, display: Display, size: { width:
   win.setBounds({ x: Math.round(work.x + (work.width - width) / 2), y: work.y + 6, width, height })
 }
 
-export const ASK_BUTTON_SIZE = { width: 104, height: 48 }
+export const ASK_BUTTON_SIZE = { width: 208, height: 48 }
 
-/** The little "Ask" button that appears next to the cursor after a highlight. Never takes focus. */
+/** The little Ask / Animate buttons that appear next to the cursor after a highlight. Never take focus. */
 export function createAskButton(): BrowserWindow {
   const win = new BrowserWindow({
     ...ASK_BUTTON_SIZE,
@@ -263,4 +264,79 @@ export function placeAskButton(win: BrowserWindow, at: { x: number; y: number },
   const x = Math.max(work.x, Math.min(at.x + 6, work.x + work.width - width))
   const y = Math.max(work.y, Math.min(at.y + 12, work.y + work.height - height))
   win.setBounds({ x, y, width, height })
+}
+
+// ---------- the visual island ----------
+
+/** The visual island: the animation's own small window (the picture, what's being said, and the
+ *  controls), beside the student's code. Shows without taking focus; drag it by its top bar. */
+export function createVisualIsland(): BrowserWindow {
+  const win = new BrowserWindow({
+    width: 460,
+    height: 320,
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    enableLargerThanScreen: true,
+    hasShadow: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    acceptFirstMouse: true, // the first click on a control works without focusing the window first
+    backgroundColor: '#00000000',
+    title: 'Clueless animation',
+    ...PANEL_TYPE,
+    webPreferences
+  })
+  win.setAlwaysOnTop(true, 'screen-saver', 1) // above the highlight drawn on the code
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
+  loadRenderer(win, 'visual')
+  return win
+}
+
+/**
+ * Beside the highlighted code (right, left, below or above, whichever fits), out from under the
+ * panel (`avoid`, display-local). No spot: the right side of the screen, a little below the top.
+ */
+export function placeVisualIsland(
+  win: BrowserWindow,
+  display: Display,
+  size: { width: number; height: number },
+  spot: CodeSpot | null,
+  avoid: Rect | null
+): void {
+  const { bounds, workArea } = display
+  const width = Math.min(Math.ceil(size.width), workArea.width - 16)
+  const height = Math.min(Math.ceil(size.height), workArea.height - 16)
+  let x = workArea.x + workArea.width - width - 24
+  let y = workArea.y + Math.round(workArea.height / 5)
+  if (spot) {
+    const area = spot.lineHeight > 0 ? { x: spot.left, y: spot.top, width: spot.width, height: spot.lines * spot.lineHeight } : { x: spot.left, y: spot.top, width: 1, height: 1 }
+    const { card } = placeCard(area, { width, height }, bounds, avoid, area.y + area.height / 2)
+    x = bounds.x + card.x
+    y = bounds.y + card.y
+  }
+  win.setBounds(keepOnScreen({ x, y, width, height }, workArea))
+}
+
+/** The visual island measured itself: keep its top-left corner, and keep it on screen. */
+export function resizeVisualIsland(win: BrowserWindow, size: { width: number; height: number }): void {
+  const b = win.getBounds()
+  const work = screen.getDisplayMatching(b).workArea
+  const width = Math.min(Math.ceil(size.width), work.width - 16)
+  const height = Math.min(Math.ceil(size.height), work.height - 16)
+  if (width === b.width && height === b.height) return
+  win.setBounds(keepOnScreen({ x: b.x, y: b.y, width, height }, work))
+}
+
+function keepOnScreen(r: Rect, work: Rect): Rect {
+  return {
+    x: Math.round(Math.max(work.x + 8, Math.min(r.x, work.x + work.width - r.width - 8))),
+    y: Math.round(Math.max(work.y + 8, Math.min(r.y, work.y + work.height - r.height - 8))),
+    width: r.width,
+    height: r.height
+  }
 }

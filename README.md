@@ -18,8 +18,14 @@ giving you the answer. Code, math, physics and most other problem sets, on macOS
   - can animate your code or the idea behind a question
   - can talk
   - ends with a short recap
-- **The island** is for quick questions: highlight anything, click **Ask**, and the answer shows in the
-  panel. With Animate on, highlighted code runs step by step right where it is on your screen.
+- **The small window** (the panel shrunk): type a question right in it, talk with the mic, turn
+  spoken replies on or off, and open settings (transparency, new session, quit).
+- **The island** is for quick questions: highlight anything and pick a button next to the cursor.
+  - **Ask** explains it in the panel.
+  - **Animate** explains it with an animation and a voice in the **visual island**, a small window
+    beside your text. Code runs step by step with its variables drawn as boxes; a math problem or a
+    paragraph gets a picture of the idea. The line being explained lights up on your screen, in your
+    browser or editor. Go back, stop, and change the speed from the visual island.
 
 ## Setup
 
@@ -60,7 +66,6 @@ On Windows PowerShell, use `npm.cmd` if `npm` scripts are blocked.
 | Command | |
 |---|---|
 | `npm run dev` | run the app |
-| `npm run ui` | the panel in a browser with a sample session; add `?island` for the island demo |
 | `npm run try -- "problem"` | the tutor in the terminal |
 | `npm run trace -- code.py` | an Ask with Animate on, in the terminal |
 | `npm run eval` | the model test set (a few dollars of Claude calls) |

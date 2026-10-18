@@ -25,18 +25,28 @@ Tick a box by changing `- [ ]` to `- [x]`.
 - [x] Ask's animations drawn on the real screen (browser, PDF, editor); the answer in the panel; the pill is just two switches — Ali
 - [x] Faster animations: Python is run for real (Pyodide) instead of the model writing the trace — Ali
 - [x] Voice and animation in sync: each step is read aloud and the next waits for it — Ali
+- [x] Ask / Animate buttons on a highlight; Animate plays in the visual island (its own window, with
+  back, stop, speed and its own voice) while the line lights up on the screen — Ali
+- [x] Animate on non-code (math, physics, a paragraph): a concept lesson, a scene per step — Ali
+
+**The windows**
+- [x] Small window: type a question, mic, spoken replies on/off, settings — Ali
+- [x] Big window: settings on the right (transparency, new session, quit); no ✕ or transparency button — Ali
 
 **Housekeeping**
+- [x] Removed the browser preview (`npm run ui`) and its mock data: test in the real app — Ali
 - [x] Restored work lost in the PR #3 merge, island as its own mode (PR #4) — Ali
 - [x] Sonnet 5.5 for the tutor, Haiku 5.5 for small jobs, and a 15-problem model test set (`npm run eval`) — Ali
 - [x] Removed flashcards (the recap and the gap list stay) — Ali
-- [x] Tests (118), typecheck, smoke test of the panel, the island, Python runs and the stage
+- [x] Tests (126), typecheck, smoke test of the panel, the island, Python runs, the stage and the visual island
 
 ## Next
 
 - [ ] Run the model test set on Sonnet and Haiku (`npm run eval`) once Bedrock access to them is on
 - [ ] Run more languages for real (JavaScript next); Claude traces them for now
-- [ ] Follow the code when the page scrolls, instead of stopping the animation
+- [ ] Follow the code when the page scrolls, instead of hiding the line highlight
+- [ ] Faster Animate: stream the reply and start at step 1, a smaller trace format, voice that
+  doesn't hold up step 1
 
 ## Before the demo
 

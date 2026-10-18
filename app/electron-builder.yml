@@ -6,7 +6,7 @@ files:
   - '!**/.vscode/*'
   - '!src/*'
   - '!scripts/*'
-  - '!{electron.vite.config.mts,vite.ui.config.mts,vitest.config.mts,electron-builder.yml}'
+  - '!{electron.vite.config.mts,vitest.config.mts,electron-builder.yml}'
   - '!{.env,.env.*,*.md}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
 asarUnpack:

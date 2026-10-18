@@ -1,8 +1,9 @@
-// The answer to an Ask, in the panel: what was highlighted, the latest question and answer,
-// follow-ups, and while the animation plays on the code, its controls.
+// The answer to Ask or Animate, in the panel: what was highlighted, the latest question and
+// answer, and follow-ups. An Animate run plays in the visual island (it has the controls); here
+// there's just where it's at, Stop, and Replay once it's off the screen.
 import { useEffect, useState, type KeyboardEvent } from 'react'
-import type { IslandView } from '../../../shared/contracts'
-import { BackIcon, CloseIcon, NextIcon, PauseIcon, PlayIcon, RetryIcon, SendIcon, SpeakerIcon, SpeakerOffIcon, StopIcon } from '../components/icons'
+import { stepCount, type IslandView } from '../../../shared/contracts'
+import { CloseIcon, PlayIcon, RetryIcon, SendIcon, SpeakerIcon, SpeakerOffIcon, StopIcon } from '../components/icons'
 import { Markdown } from '../components/Markdown'
 import { Button, cx, IconButton } from '../components/ui'
 import { speech } from '../voice/speaker'
@@ -20,7 +21,7 @@ export function AskCard({ view, onReadAloud }: { view: IslandView; onReadAloud?:
     <div className="space-y-2 px-3 py-2.5" data-ask-card>
       <div className="flex items-center gap-2">
         <span className="shrink-0 rounded-full bg-claude-500/15 px-2 py-px text-[10.5px] font-semibold uppercase tracking-wide text-claude-700 dark:text-claude-400">
-          Ask
+          {view.animate ? 'Animate' : 'Ask'}
         </span>
         {view.snippet && <SnippetPreview text={view.snippet} />}
         <VoiceToggle />
@@ -54,18 +55,18 @@ export function AskCard({ view, onReadAloud }: { view: IslandView; onReadAloud?:
       )}
       {view.error && <div className="rounded-lg bg-rose-50 px-2.5 py-1.5 text-xs text-rose-700 dark:bg-rose-950/50 dark:text-rose-200">{view.error}</div>}
       {view.notice && <div className="rounded-lg bg-zinc-100 px-2.5 py-1.5 text-xs text-zinc-600 dark:bg-white/10 dark:text-zinc-300">{view.notice}</div>}
-      {view.phase === 'answer' && view.trace && <Playback view={view} />}
+      {view.phase === 'answer' && stepCount(view) > 0 && <Playback view={view} />}
       {view.phase === 'answer' && !view.error && <FollowUp />}
     </div>
   )
 }
 
-/** Voice on: the answer and every step of the animation are read aloud, and the animation waits for them. */
+/** Voice on: Ask's answers are read aloud (an animation has its own voice, in the visual island). */
 function VoiceToggle() {
   const on = useVoiceMode()
   return (
     <IconButton
-      title={on ? 'Voice is on: each step is read aloud. Click to turn it off' : 'Read the answer and each step aloud'}
+      title={on ? 'Voice is on: answers are read aloud. Click to turn it off' : 'Read answers aloud'}
       aria-pressed={on}
       onClick={() => {
         voiceMode.set(!on)
@@ -102,52 +103,35 @@ function Thinking({ since, animate }: { since: number | null; animate: boolean }
         <span className="busy-dot h-1.5 w-1.5 rounded-full bg-claude-500" />
         <span className="busy-dot h-1.5 w-1.5 rounded-full bg-claude-500" />
       </span>
-      {animate ? 'Getting your code ready to run…' : 'Reading what you highlighted…'}
+      {animate ? 'Making the animation…' : 'Reading what you highlighted…'}
       <span className="tabular-nums text-zinc-400">{seconds}s</span>
     </div>
   )
 }
 
-/** Play / pause / step through the animation on the code, replay it, or take it off the screen. */
+/** Where the animation is at (its controls are in the visual island), or Replay once it's off the screen. */
 function Playback({ view }: { view: IslandView }) {
-  const total = view.trace?.steps.length ?? 0
+  const total = stepCount(view)
   const p = view.playback
   if (!p) {
     return (
       <div className="flex items-center gap-2">
-        <Button variant="chip" onClick={() => islandApi.replay()} disabled={!view.animate} title={view.animate ? 'Play it on your code again' : 'Turn Animate on to play it'}>
-          <RetryIcon size={12} /> Replay on my code
+        <Button variant="chip" onClick={() => islandApi.replay()} title="Play the animation again">
+          <RetryIcon size={12} /> Replay the animation
         </Button>
         <span className="text-[11px] text-zinc-400">{total} steps</span>
       </div>
     )
   }
   return (
-    <div className="flex items-center gap-1">
-      <IconButton title="Step back" onClick={() => islandApi.step(-1)} disabled={p.index <= 0} className="h-7 w-7 disabled:opacity-30">
-        <BackIcon size={13} />
-      </IconButton>
-      {p.playing ? (
-        <IconButton title="Pause" onClick={() => islandApi.pause()} className="h-7 w-7">
-          <PauseIcon size={13} />
-        </IconButton>
-      ) : (
-        <IconButton title={p.index >= total - 1 ? 'Play again' : 'Play'} onClick={() => islandApi.play()} className="h-7 w-7">
-          <PlayIcon size={13} />
-        </IconButton>
-      )}
-      <IconButton title="Step forward" onClick={() => islandApi.step(+1)} disabled={p.index >= total - 1} className="h-7 w-7 disabled:opacity-30">
-        <NextIcon size={13} />
-      </IconButton>
-      <div className="mx-1.5 h-1 flex-1 overflow-hidden rounded-full bg-zinc-900/10 dark:bg-white/10">
-        <div className="h-full rounded-full bg-claude-500 transition-[width] duration-500" style={{ width: `${total ? (Math.max(0, p.index + 1) / total) * 100 : 0}%` }} />
-      </div>
-      <span className={cx('w-12 text-right text-[11px] tabular-nums text-zinc-500')}>
-        {Math.max(0, p.index + 1)} / {total}
+    <div className="flex items-center gap-2 text-[11.5px] text-zinc-500 dark:text-zinc-400">
+      <PlayIcon size={11} className={cx('shrink-0 text-claude-500', p.playing && 'animate-pulse')} />
+      <span className="min-w-0 flex-1 truncate">
+        {p.index < 0 ? 'Starting the animation' : p.playing ? 'Animating' : 'Paused'} · step {Math.max(0, p.index + 1)} of {total}
       </span>
-      <IconButton title="Take it off the screen" onClick={() => islandApi.stop()} className="h-7 w-7">
-        <StopIcon size={12} />
-      </IconButton>
+      <Button variant="chip" onClick={() => islandApi.stop()} title="Take the animation off the screen">
+        <StopIcon size={11} /> Stop
+      </Button>
     </div>
   )
 }

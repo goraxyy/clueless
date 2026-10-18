@@ -1,10 +1,13 @@
-// A code trace: what "Ask" on highlighted code comes back with when Animate is on.
-// Every step the code runs: which line, which part of the line, and the new value of every
-// variable ("entity") that changed. Python is run for real to get it (src/main/run); for other
-// languages Claude reads the code and writes the steps down itself.
+// What Animate on a highlight comes back with.
+// - Code: a trace. Every step the code runs: which line, which part of the line, and the new value
+//   of every variable ("entity") that changed. Python is run for real to get it (src/main/run); for
+//   other languages Claude reads the code and writes the steps down itself.
+// - Anything else (a math problem, a paragraph): a lesson. A few steps, each a picture (the same
+//   scenes the tutor draws), the lines of the highlight it's about, and what's said over it.
 //
-// The wire schema has no unions (fast to compile as a structured output); "nothing" is "" or [].
+// The wire schema has one union (a lesson step's scene); "nothing" is "" or [] everywhere else.
 import { z } from 'zod'
+import { Scene } from './schema'
 
 export const EntityKind = z.enum([
   'value', // a number, string, bool, None, ...: one box
@@ -50,7 +53,16 @@ export const TraceWire = z.object({
   run: z.object({
     setup: z.string(), // runs first: the inputs the code needs
     call: z.string() // runs after it to start it, e.g. "Solution().twoSum([2, 7, 11, 15], 9)"
-  })
+  }),
+  // [ANIMATE ON] and the highlight isn't code: the concept, step by step. [] otherwise.
+  lesson: z.array(
+    z.object({
+      line: z.number(), // 1-based, in the highlighted text; 0 = not about one part of it
+      endLine: z.number(), // same as line for one line
+      say: z.string(), // read aloud while this step is on screen; one or two short sentences
+      scene: Scene // the whole picture at this step
+    })
+  )
 })
 
 export type EntityKind = z.infer<typeof EntityKind>
@@ -82,12 +94,27 @@ export interface CodeTrace {
   steps: TraceStep[]
 }
 
+export interface LessonStep {
+  line: number | null // the highlighted line it's about; null = the whole idea
+  endLine: number | null
+  say: string
+  scene: z.infer<typeof Scene>
+}
+
+/** A concept animation: Animate on something that isn't code. */
+export interface Lesson {
+  text: string // the highlighted text, normalized; step line numbers point into it
+  steps: LessonStep[]
+}
+
 export interface TraceReply {
   message: string
   trace: CodeTrace | null
+  lesson: Lesson | null
 }
 
 export const MAX_STEPS = 120
+export const MAX_LESSON_STEPS = 16
 
 /** Make copied code clean and stable: \n line ends, tabs as 4 spaces, no shared indent, no blank edges. */
 export function normalizeSnippet(text: string): string {
@@ -145,8 +172,18 @@ export function fromTraceWire(wire: TraceWireT, code: string): TraceReply {
     })
   }
 
-  const trace = entities.length && steps.length && lines.some((l) => l.trim()) ? { language: wire.language.trim(), code, entities, steps } : null
-  return { message, trace }
+  const hasText = lines.some((l) => l.trim())
+  const trace = entities.length && steps.length && hasText ? { language: wire.language.trim(), code, entities, steps } : null
+
+  const lessonSteps: LessonStep[] = []
+  for (const s of wire.lesson.slice(0, MAX_LESSON_STEPS)) {
+    const say = s.say.trim()
+    if (!say) continue
+    const line = s.line >= 1 ? clampInt(s.line, 1, lines.length) : null
+    lessonSteps.push({ line, endLine: line && clampInt(s.endLine, line, lines.length), say, scene: s.scene })
+  }
+  const lesson = !trace && lessonSteps.length && hasText ? { text: code, steps: lessonSteps } : null
+  return { message, trace, lesson }
 }
 
 function clampInt(v: number, lo: number, hi: number): number {

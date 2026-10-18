@@ -1,10 +1,10 @@
-// The island's state machine: highlight -> Ask -> thinking -> the answer in the panel, and with
-// Animate on, the step-by-step animation drawn over the highlighted code. It also paces the
-// animation: one step every STEP_MS, or, with voice on, the next step once the panel has finished
-// reading the current one aloud.
-// No Electron or Node imports: the main process runs it for real, and the browser mock
-// (`npm run ui`) runs the very same logic with a fake tracer.
-import type { CodeSpot, IslandView } from './contracts'
+// The island's state machine: highlight -> Ask or Animate -> thinking -> the answer in the panel.
+// Animate also plays the answer step by step: in the visual island (its own window, with the
+// picture and the controls) and highlighted on the student's code. It paces the animation: one
+// step at a time at the chosen speed, or, with voice on, the next step once the visual island has
+// finished reading the current one aloud.
+// No Electron or Node imports, so the tests run it with a fake tracer and timers.
+import { SPEEDS, stepCount, type CodeSpot, type IslandView } from './contracts'
 import type { TraceReply } from './trace'
 
 export interface ScreenImage {
@@ -41,23 +41,26 @@ export interface IslandDeps {
   now(): number
 }
 
-/** Before step 1: time to spot the drawing on the code. */
+/** Before step 1 (voice off): time to read the answer and spot the highlight on the code. */
 export const INTRO_MS = 1800
-/** One step, voice off. */
+/** One code step at 1x, voice off. */
 export const STEP_MS = 2000
-/** Voice on: a step stays at least this long, even if its line is short. */
+/** Voice off: a lesson step stays long enough to read what it says (per word, at 1x). */
+export const READ_MS_PER_WORD = 330
+/** Voice on: a step stays at least this long at 1x, even if its line is short. */
 export const MIN_STEP_MS = 700
-/** Voice on: never wait longer than this for a step's narration (the panel may be gone). */
+/** Voice on: never wait longer than this for a step's narration at 1x (the voice may fail). */
 export const MAX_STEP_MS = 12_000
 /** Voice on: the intro reads the whole answer first. */
 export const MAX_INTRO_MS = 30_000
-/** A finished animation stays this long on the code, then clears (the text stays in the panel). */
-export const FINISHED_MS = 8000
 
 export const NO_KEY_MESSAGE =
   'Add your Claude key first: put ANTHROPIC_API_KEY (or the AWS Bedrock lines) in app/.env, then try again.'
 
-export const SCROLLED_NOTICE = 'The page moved, so the animation stopped. Press Replay once the code is back where it was.'
+export const SCROLLED_NOTICE = 'The page moved, so the highlight on your code is off. Scroll back and press Replay to see it again.'
+
+/** What stays the same from one question to the next. */
+type Prefs = Pick<IslandView, 'askOnHighlight' | 'speed' | 'voice'>
 
 export class IslandController {
   private view: IslandView
@@ -68,21 +71,12 @@ export class IslandController {
   private narrated = false
   private stepStarted = 0
 
-  constructor(
-    private readonly deps: IslandDeps,
-    animate = true
-  ) {
-    this.view = idleView(animate, true)
+  constructor(private readonly deps: IslandDeps) {
+    this.view = idleView({ askOnHighlight: true, speed: 1, voice: true })
   }
 
   get current(): IslandView {
     return structuredClone(this.view)
-  }
-
-  setAnimate(on: boolean): void {
-    this.view.animate = on
-    if (!on) this.stopPlayback(false)
-    this.emit()
   }
 
   setAskOnHighlight(on: boolean): void {
@@ -90,21 +84,35 @@ export class IslandController {
     this.emit()
   }
 
-  /** The panel reads steps aloud (voice on) and reports when each one is done. */
+  /** The visual island's speed button. The current step is re-timed from now. */
+  setSpeed(speed: number): void {
+    if (!SPEEDS.includes(speed as (typeof SPEEDS)[number]) || speed === this.view.speed) return
+    this.view.speed = speed
+    if (this.view.playback?.playing) this.scheduleNext()
+    this.emit()
+  }
+
+  /** The visual island's voice button: read each step aloud (it reports back with setNarrated). */
+  setVoice(on: boolean): void {
+    if (this.view.voice === on) return
+    this.view.voice = on
+    this.emit()
+  }
+
+  /** The visual island reads steps aloud and reports when each one is done. */
   setNarrated(on: boolean): void {
     if (this.narrated === on) return
     this.narrated = on
     if (this.view.playback?.playing) this.scheduleNext() // re-time the current step
   }
 
-  /** The student clicked Ask on a highlight. */
-  async ask(snippet: string): Promise<void> {
+  /** The student clicked Ask (explain it) or Animate (explain it with an animation and voice) on a highlight. */
+  async ask(snippet: string, animate: boolean): Promise<void> {
     if (!snippet.trim()) return
     const run = this.restart()
     const tracer = this.deps.makeTracer()
     this.tracer = tracer
-    const { animate, askOnHighlight } = this.view
-    this.view = { ...idleView(animate, askOnHighlight), phase: 'thinking', snippet, busySince: this.deps.now() }
+    this.view = { ...idleView(this.prefs()), animate, phase: 'thinking', snippet, busySince: this.deps.now() }
     this.emit()
     if (!tracer) return this.fail(run, NO_KEY_MESSAGE)
     await this.attempt(run, animate, async () => {
@@ -131,11 +139,11 @@ export class IslandController {
     await this.attempt(run, animate, () => tracer.followUp(text, animate))
   }
 
-  /** ✕ on the Ask card, a new highlight, Hide: nothing asked any more. Anything in flight is dropped. */
+  /** ✕ on the Ask card, a new session, Hide: nothing asked any more. Anything in flight is dropped. */
   close(): void {
     this.restart()
     this.tracer = null
-    this.view = idleView(this.view.animate, this.view.askOnHighlight)
+    this.view = idleView(this.prefs())
     this.emit()
   }
 
@@ -170,8 +178,9 @@ export class IslandController {
   }
 
   replay(): void {
-    if (!this.view.trace || this.view.phase !== 'answer') return
+    if (!stepCount(this.view) || this.view.phase !== 'answer') return
     this.view.notice = null
+    this.view.spotLost = false
     this.startPlayback()
   }
 
@@ -183,18 +192,19 @@ export class IslandController {
     if (emit) this.emit()
   }
 
-  /** The panel finished reading step `index` aloud. */
+  /** The visual island finished reading step `index` aloud. */
   stepDone(nonce: number, index: number): void {
     const p = this.view.playback
     if (!this.narrated || !p?.playing || p.nonce !== nonce || p.index !== index) return
-    const left = Math.max(0, MIN_STEP_MS - (this.deps.now() - this.stepStarted))
+    const left = Math.max(0, MIN_STEP_MS / this.view.speed - (this.deps.now() - this.stepStarted))
     this.after(left, () => this.advance())
   }
 
-  /** The student scrolled: the drawing would no longer line up with the code. */
+  /** The student scrolled: the highlight would no longer line up with the code. The visual
+   *  island doesn't depend on where the code is, so it plays on. */
   scrolled(): void {
-    if (!this.view.playback) return
-    this.stopPlayback(false)
+    if (!this.view.playback || !this.view.spot || this.view.spotLost) return
+    this.view.spotLost = true
     this.view.notice = SCROLLED_NOTICE
     this.emit()
   }
@@ -208,13 +218,22 @@ export class IslandController {
     this.emit()
   }
 
-  /** Time the current step: a fixed time, or (voice on) until its narration ends. */
+  /** Time the current step at the chosen speed: long enough to take it in, or (voice on) until
+   *  its narration ends, with a safety limit. */
   private scheduleNext(): void {
     const p = this.view.playback
     if (!p) return
     this.stepStarted = this.deps.now()
-    if (this.narrated) this.after(p.index < 0 ? MAX_INTRO_MS : MAX_STEP_MS, () => this.advance())
-    else this.after(p.index < 0 ? INTRO_MS : STEP_MS, () => this.advance())
+    const said = p.index >= 0 ? this.view.lesson?.steps[p.index]?.say : undefined
+    const reading = said ? said.split(/\s+/).length * READ_MS_PER_WORD : 0
+    const ms = this.narrated
+      ? p.index < 0
+        ? MAX_INTRO_MS
+        : Math.max(MAX_STEP_MS, reading * 2)
+      : p.index < 0
+        ? INTRO_MS
+        : Math.max(STEP_MS, reading)
+    this.after(ms / this.view.speed, () => this.advance())
   }
 
   private advance(): void {
@@ -226,19 +245,19 @@ export class IslandController {
     this.emit()
   }
 
-  /** On the last step: stop there, and clear the drawing after a while. */
+  /** On the last step: stop there. It stays up (to step back through it) until Stop. */
   private finish(): void {
     const p = this.view.playback
-    if (!p) return
-    p.playing = false
-    const nonce = p.nonce
-    this.after(FINISHED_MS, () => {
-      if (this.view.playback?.nonce === nonce && !this.view.playback.playing) this.stopPlayback()
-    })
+    if (p) p.playing = false
   }
 
   private lastIndex(): number {
-    return (this.view.trace?.steps.length ?? 0) - 1
+    return stepCount(this.view) - 1
+  }
+
+  private prefs(): Prefs {
+    const { askOnHighlight, speed, voice } = this.view
+    return { askOnHighlight, speed, voice }
   }
 
   private async attempt(run: number, animate: boolean, call: () => Promise<TraceReply | null>): Promise<void> {
@@ -254,8 +273,10 @@ export class IslandController {
     view.busySince = null
     view.messages.push({ role: 'clueless', text: reply.message || "I couldn't find anything to explain there." })
     view.trace = reply.trace
+    view.lesson = reply.lesson
+    view.spotLost = false
     view.phase = 'answer'
-    if (animate && reply.trace && view.spot) this.startPlayback()
+    if (animate && stepCount(view)) this.startPlayback()
     else this.emit()
   }
 
@@ -291,15 +312,17 @@ export class IslandController {
   }
 }
 
-function idleView(animate: boolean, askOnHighlight: boolean): IslandView {
+function idleView(prefs: Prefs): IslandView {
   return {
-    askOnHighlight,
-    animate,
+    ...prefs,
+    animate: false,
     phase: 'idle',
     snippet: null,
     messages: [],
     trace: null,
+    lesson: null,
     spot: null,
+    spotLost: false,
     playback: null,
     busySince: null,
     error: null,

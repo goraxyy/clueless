@@ -1,9 +1,10 @@
-// The island: a dark pill at the top of the screen with two switches. "Ask" shows an Ask button
-// after you highlight something; "Animate" makes code answers play step by step on the code
-// itself. The answers show in the panel (AskCard), the animation on the code (TraceStage).
+// The island: a dark pill at the top of the screen with one switch, "Highlight": while it's on,
+// highlighting anything brings up two buttons next to the cursor. Ask explains it in the panel
+// (AskCard); Animate also plays it step by step, with a voice, in the visual island
+// (VisualIsland) while the line it's on lights up on the screen (TraceStage).
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { IslandView } from '../../../shared/contracts'
-import { ChevronDownIcon, Logo } from '../components/icons'
+import { ChevronDownIcon, Logo, PlayIcon } from '../components/icons'
 import { cx } from '../components/ui'
 import { islandApi } from './api'
 
@@ -49,16 +50,14 @@ export function Pill({ view }: { view: IslandView }) {
           <Logo size={19} />
         </div>
         <Switch
-          label="Ask"
+          label="Highlight"
           on={view.askOnHighlight}
           onChange={(on) => islandApi.setAskOnHighlight(on)}
-          title={view.askOnHighlight ? 'Ask is on: highlight anything to get an Ask button' : 'Ask is off: highlighting does nothing'}
-        />
-        <Switch
-          label="Animate"
-          on={view.animate}
-          onChange={(on) => islandApi.setAnimate(on)}
-          title={view.animate ? 'Animate is on: highlighted code plays step by step, right on the code' : 'Animate is off: answers are text only'}
+          title={
+            view.askOnHighlight
+              ? 'On: highlight anything to get Ask and Animate buttons'
+              : 'Off: highlighting does nothing (turn it off in a terminal, where Ctrl+C stops programs)'
+          }
         />
         <button
           type="button"
@@ -91,16 +90,27 @@ function Switch({ label, on, onChange, title }: { label: string; on: boolean; on
   )
 }
 
-/** The "Ask" button window that appears next to the cursor after a highlight. */
-export function AskButton({ onAsk = () => islandApi.ask() }: { onAsk?: () => void }) {
+/** The window next to the cursor after a highlight: Ask (explain it in the panel) or Animate
+ *  (explain it with an animation and a voice, in the visual island). */
+export function SelectionButtons() {
   return (
-    <button
-      type="button"
-      onMouseDown={(e) => e.preventDefault()} // keep the highlight in the browser mock
-      onClick={onAsk}
-      className="flex h-9 items-center gap-1.5 rounded-full bg-claude-500 pl-2 pr-4 text-[14px] font-semibold text-zinc-950 shadow-[0_6px_20px_rgba(0,0,0,0.35)] ring-1 ring-black/10 hover:bg-claude-400"
-    >
-      <Logo size={17} /> Ask
-    </button>
+    <div className="flex items-center gap-1.5">
+      <button
+        type="button"
+        onClick={() => islandApi.ask(false)}
+        title="Explain this in the panel"
+        className="flex h-9 items-center gap-1.5 rounded-full bg-claude-500 pl-2 pr-4 text-[14px] font-semibold text-zinc-950 shadow-[0_6px_20px_rgba(0,0,0,0.35)] ring-1 ring-black/10 hover:bg-claude-400"
+      >
+        <Logo size={17} /> Ask
+      </button>
+      <button
+        type="button"
+        onClick={() => islandApi.ask(true)}
+        title="Explain it with an animation and a voice"
+        className="flex h-9 items-center gap-1.5 rounded-full bg-zinc-900 pl-2.5 pr-4 text-[14px] font-semibold text-zinc-50 shadow-[0_6px_20px_rgba(0,0,0,0.35)] ring-1 ring-white/15 hover:bg-zinc-800"
+      >
+        <PlayIcon size={14} className="text-claude-400" /> Animate
+      </button>
+    </div>
   )
 }

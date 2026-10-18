@@ -1,6 +1,6 @@
-// Where the floating animation card goes in code mode: next to the student's code, never on top
-// of it if there's room, and out from under the Clueless panel.
-import type { Rect } from '../../../shared/contracts'
+// Where a card goes next to the student's code (the tutor's code-mode animation, the visual
+// island): never on top of it if there's room, and out from under the Clueless panel.
+import type { Rect } from './contracts'
 
 export type Side = 'right' | 'left' | 'below' | 'above' | 'inside'
 
@@ -87,4 +87,19 @@ export function arrowPath(from: Point, to: Point, side: Side): string {
   }
   const dx = (to.x - from.x) / 2
   return `M${from.x} ${from.y} C${from.x + dx} ${from.y} ${to.x - dx} ${to.y} ${to.x} ${to.y}`
+}
+
+/**
+ * The arrow from the code line at `anchorY` (in `area`, the highlighted code) to a card that's
+ * already somewhere (the visual island). null when the card covers the code.
+ */
+export function arrowTo(area: Rect, anchorY: number, card: Rect): { from: Point; to: Point; side: Side } | null {
+  const cardY = clamp(anchorY, card.y + 18, card.y + card.height - 18)
+  const cardX = card.x + card.width / 2
+  const lineX = clamp(cardX, area.x + 16, area.x + area.width - 16)
+  if (card.x >= area.x + area.width) return { from: { x: area.x + area.width, y: anchorY }, to: { x: card.x, y: cardY }, side: 'right' }
+  if (card.x + card.width <= area.x) return { from: { x: area.x, y: anchorY }, to: { x: card.x + card.width, y: cardY }, side: 'left' }
+  if (card.y >= area.y + area.height) return { from: { x: lineX, y: area.y + area.height }, to: { x: cardX, y: card.y }, side: 'below' }
+  if (card.y + card.height <= area.y) return { from: { x: lineX, y: area.y }, to: { x: cardX, y: card.y + card.height }, side: 'above' }
+  return null
 }
