@@ -29,7 +29,11 @@ giving you the answer. Code, math, physics and most other problem sets, on macOS
 
 ## Setup
 
-You'll need [Node.js](https://nodejs.org) and access to Claude through Amazon Bedrock or a Claude API key.
+**Quickest (macOS / Linux):** from the repo folder, run `./start.sh`. It checks Node, installs
+everything, asks for your Claude key the first time (saved in `app/.env`), and starts the app.
+
+Or by hand: you'll need [Node.js](https://nodejs.org) 22.12 or newer and access to Claude through
+Amazon Bedrock or a Claude API key.
 
 ```bash
 cd app
