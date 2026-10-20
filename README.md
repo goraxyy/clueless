@@ -1,5 +1,9 @@
 # Clueless
 
+[![Watch the Clueless demo](https://img.youtube.com/vi/BK3x3UDiUfQ/hqdefault.jpg)](https://youtu.be/BK3x3UDiUfQ)
+
+**[Watch the demo video](https://youtu.be/BK3x3UDiUfQ)**
+
 | Keys | |
 |---|---|
 | `Cmd/Ctrl + Shift + Space` | read the screen |
