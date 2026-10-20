@@ -10,7 +10,7 @@ instead of giving you the answer.
 |---|---|
 | **Ali** | The idea and the docs. The app's base: the floating panel, screen capture, the tutor (Claude prompt and engine), answer checking, stuck detection, gap tracking, Bedrock support, full-screen support, the compact orange panel. Repaired the PR #3 merge (PR #4). Then: Ask's answers in the panel and its animations on the real screen, code runs (Pyodide), voice in step with the animation, Sonnet/Haiku per task with a test set, flashcards removed. Then: Ask / Animate on a highlight with the visual island (back, stop, speed, its own voice) and concept lessons for non-code, the small window's text box and voice button, settings in both windows, browser preview removed. |
 | **Nuris** | Panel improvements: asks what's tripping you up after a scan, shorter replies, resizable panel, layout fixes, clickable plan steps. |
-| **Rasim** | Voice: talking to Clueless (Deepgram) and Clueless talking back (ElevenLabs). PRs #1 and #2. |
+| **Rasim** | The idea and feature ideation. Voice in both directions (Deepgram speech-to-text, ElevenLabs spoken replies; PRs #1 and #2), the home screen and compact pill (PR #6), and the demo video in the README. |
 | **Nurassyl** | Animations: the visual engine, Animate my code / problem / question, code mode and explain mode. The island: highlight code, Ask, step-by-step trace. PR #3. |
 
 ## Why
