@@ -15,11 +15,13 @@
     "dist:mac": "electron-vite build && electron-builder --mac",
     "dist:win": "electron-vite build && electron-builder --win",
     "trace": "tsx scripts/try-trace.mts",
-    "eval": "tsx scripts/model-eval.mts"
+    "eval": "tsx scripts/model-eval.mts",
+    "allowlist": "tsx scripts/server-allowlist.mts"
   },
   "dependencies": {
     "@anthropic-ai/bedrock-sdk": "^0.35.0",
     "@anthropic-ai/sdk": "^0.135.0",
+    "@supabase/supabase-js": "2.118.0",
     "mathjs": "^15.2.0",
     "pyodide": "^314.0.7",
     "uiohook-napi": "^1.5.5",

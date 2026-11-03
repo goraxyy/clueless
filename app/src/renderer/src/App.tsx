@@ -7,9 +7,11 @@ import { AskCard } from './island/AskCard'
 import { useAnswerReadAloud } from './island/useNarration'
 import { IslandScreen, SelectionButtons, useIslandView } from './island/IslandScreen'
 import { VisualIsland } from './island/VisualIsland'
+import { AccountScreen } from './screens/Account'
 import { AreaSelector } from './screens/AreaSelector'
 import { Banners, CompactBar, EmptyState, GLASS_ALPHA, Header, SettingsMenu, type Glass } from './screens/Home'
 import { GapsScreen } from './screens/Gaps'
+import { HistoryScreen } from './screens/History'
 import { SessionScreen } from './screens/Session'
 import { VoiceStrip } from './components/MicButton'
 import { useVoiceConversation } from './voice/useVoiceConversation'
@@ -47,13 +49,15 @@ function windowMode(compact: boolean): WindowMode {
 function Overlay() {
   const [status, setStatus] = useState<AppStatus | null>(null)
   const [session, setSession] = useState<SessionView | null>(null)
-  const [screen, setScreen] = useState<'main' | 'gaps'>('main')
+  const [screen, setScreen] = useState<'main' | 'gaps' | 'history'>('main')
   const [compact, setCompact] = useState(false)
   const [glass, setGlass] = useState<Glass>(loadGlass)
   const [size, setSize] = useState<PanelSize>(loadSize)
   const [menu, setMenu] = useState(false)
   const islandView = useIslandView()
   const asking = Boolean(islandView && islandView.phase !== 'idle')
+  // Claude goes through the student's account: until it's ready, the panel is the sign-in screen.
+  const signIn = status?.provider === 'clueless' && status.account && status.account.state !== 'ready' ? status.account : null
   useAnswerReadAloud(islandView)
 
   useEffect(() => {
@@ -78,6 +82,11 @@ function Overlay() {
     setScreen('main')
     setCompactMode(false)
   }, [session?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Signing in needs the big window.
+  useEffect(() => {
+    if (signIn && compact) setCompactMode(false)
+  }, [Boolean(signIn), compact]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // A new Ask: its answer shows here, so open the panel up.
   useEffect(() => {
@@ -220,17 +229,25 @@ function Overlay() {
               setMenu(false)
               setScreen('gaps')
             }}
+            onOpenHistory={() => {
+              setMenu(false)
+              setScreen('history')
+            }}
           />
         )}
         {menu && !compact && (
-          <SettingsMenu glass={glass} onGlass={changeGlass} onNewSession={newSession} onClose={() => setMenu(false)} overContent />
+          <SettingsMenu glass={glass} account={status?.account ?? null} onGlass={changeGlass} onNewSession={newSession} onClose={() => setMenu(false)} overContent />
         )}
         {!compact && (
           <>
             <Banners status={status} />
             <div className="panel-body">
               <div className="panel-main">
-                {screen === 'gaps' ? (
+                {signIn ? (
+                  <AccountScreen account={signIn} />
+                ) : screen === 'history' ? (
+                  <HistoryScreen onBack={() => setScreen('main')} />
+                ) : screen === 'gaps' ? (
                   <GapsScreen onBack={() => setScreen('main')} />
                 ) : asking ? (
                   <AskCard view={islandView!} onReadAloud={(markdown) => speech.speak(toSpeech(markdown))} />
@@ -250,7 +267,7 @@ function Overlay() {
       </div>
       {/* The small window keeps its shape: settings slide down as a card of their own under it. */}
       {menu && compact && (
-        <SettingsMenu glass={glass} onGlass={changeGlass} onNewSession={newSession} onClose={() => setMenu(false)} overContent={false} />
+        <SettingsMenu glass={glass} account={status?.account ?? null} onGlass={changeGlass} onNewSession={newSession} onClose={() => setMenu(false)} overContent={false} />
       )}
       </div>
       {!compact && <ResizeGrips panel={panel} size={size} onSize={changeSize} />}

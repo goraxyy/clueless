@@ -131,6 +131,21 @@ export const BackIcon = (p: IconProps) => (
     <path d="M15 18l-6-6 6-6" />
   </Icon>
 )
+export const HistoryIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M3 12a9 9 0 1 0 2.6-6.4L3 8" />
+    <path d="M3 3v5h5" />
+    <path d="M12 7v5l3 2" />
+  </Icon>
+)
+export const TrashIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 7h16" />
+    <path d="M10 11v6M14 11v6" />
+    <path d="M6 7l1 13h10l1-13" />
+    <path d="M9 7V4h6v3" />
+  </Icon>
+)
 export const ChartIcon = (p: IconProps) => (
   <Icon {...p}>
     <path d="M3 3v18h18" />

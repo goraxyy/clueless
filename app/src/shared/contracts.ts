@@ -150,7 +150,9 @@ export type WindowMode = 'compact' | 'expanded' | 'wide'
 
 export interface AppStatus {
   platform: string
-  provider: 'anthropic' | 'bedrock' | null // null = no Claude credentials configured yet
+  // clueless = the student's Clueless account (our server holds the Claude key); anthropic and
+  // bedrock = a developer's own keys in .env; null = none of these set up yet
+  provider: 'clueless' | 'anthropic' | 'bedrock' | null
   model: string | null
   region: string | null // Bedrock only
   hasDeepgramKey: boolean
@@ -158,6 +160,33 @@ export interface AppStatus {
   hotkeys: { ask: string; area: string }
   hotkeyErrors: string[]
   envFile: string // where to put API keys / AWS settings
+  account: AccountView | null // null = this build has no account server
+}
+
+// ---------- the student's account ----------
+
+/**
+ * signed-out: show sign-in · waiting: the browser or an email link is finishing sign-in ·
+ * needs-invite: signed in, but no invite code and 18+ confirmation yet · ready: good to go.
+ */
+export type AccountState = 'signed-out' | 'waiting' | 'needs-invite' | 'ready'
+
+export interface AccountView {
+  state: AccountState
+  email: string | null
+  waitingFor: 'google' | 'email' | null
+  error: string | null // the last thing that went wrong, worded for the student
+  usage: UsageView | null
+}
+
+/** This week's free use, for "14 of 20 problems left". */
+export interface UsageView {
+  problemsLeft: number
+  problemsLimit: number
+  asksLeft: number
+  asksLimit: number
+  limitReached: boolean // this week's spending cap is used up, whatever the counts say
+  resetsAt: string // ISO time the week resets
 }
 
 // ---------- memory ----------
@@ -176,6 +205,44 @@ export interface GapRecord {
 export interface MemoryView {
   gaps: GapRecord[]
   sessions: number
+}
+
+// ---------- history ----------
+
+/** A problem session as history keeps it: text only, no screenshots, no hidden solution. */
+export interface SavedSession {
+  id: string
+  startedAt: string // ISO
+  updatedAt: string
+  subject: Subject
+  title: string
+  summary: string
+  solved: boolean
+  revealed: boolean
+  attempts: number
+  hintsUsed: number
+  gaps: Gap[]
+  plan: PlanStep[] // as the student saw it (steps not reached have no text)
+  thread: ThreadItem[] | null // null: saved on another computer and not downloaded yet
+  recap: RecapView | null
+}
+
+/** One row of the history list. */
+export interface HistoryItem {
+  id: string
+  title: string
+  subject: Subject
+  summary: string
+  startedAt: string
+  updatedAt: string
+  solved: boolean
+  downloaded: boolean
+}
+
+export interface HistoryView {
+  sessions: HistoryItem[]
+  // local: no account, this laptop only · synced · pending: changes waiting to go up · offline
+  sync: 'local' | 'synced' | 'pending' | 'offline'
 }
 
 export interface Rect {
@@ -210,6 +277,20 @@ export const IPC = {
   getStatus: 'app:get-status',
   getSession: 'session:get',
   getMemory: 'memory:get',
+  // History (invoke, except history and historyContinue)
+  history: 'history:update', // main -> UI: HistoryView
+  getHistory: 'history:get', // -> HistoryView (also fetches the latest list)
+  openHistory: 'history:open', // id -> SavedSession | null (downloads its conversation if needed)
+  deleteHistory: 'history:delete', // id
+  deleteAllHistory: 'history:delete-all',
+  historyContinue: 'history:continue', // UI -> main (send): id
+  // The student's account (invoke; each returns the AccountView)
+  accountGoogle: 'account:google', // sign in with Google in the browser
+  accountEmail: 'account:email', // string: email a sign-in link
+  accountCancel: 'account:cancel', // stop waiting for the browser or the email link
+  accountActivate: 'account:activate', // { invite, adult }
+  accountSignOut: 'account:sign-out',
+  accountRefresh: 'account:refresh', // re-read this week's usage
   // The click-through window over the student's code, for an Animate run's line highlight
   stageIsland: 'stage:island', // main -> stage window: StageIsland
   // Voice: one recording ("utterance") at a time, identified by an id the UI makes up
@@ -271,6 +352,20 @@ export interface CluelessApi {
   quit(): void
   openScreenSettings(): void
   getMemory(): Promise<MemoryView>
+  // history
+  getHistory(): Promise<HistoryView>
+  onHistory(cb: (view: HistoryView) => void): () => void
+  openHistory(id: string): Promise<SavedSession | null>
+  deleteHistory(id: string): Promise<HistoryView>
+  deleteAllHistory(): Promise<HistoryView>
+  continueHistory(id: string): void
+  // account
+  accountGoogle(): Promise<AccountView>
+  accountEmail(email: string): Promise<AccountView>
+  accountCancel(): Promise<AccountView>
+  accountActivate(invite: string, adult: boolean): Promise<AccountView>
+  accountSignOut(): Promise<AccountView>
+  accountRefresh(): Promise<AccountView>
   areaDone(rect: Rect): void
   areaCancel(): void
   // voice

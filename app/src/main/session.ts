@@ -6,6 +6,7 @@ import type {
   InputKind,
   PlanStep,
   ProblemInfo,
+  SavedSession,
   SessionView,
   StepIntent,
   StuckState,
@@ -18,7 +19,8 @@ import type {
   UserAction
 } from '../shared/contracts'
 import { checkAnswer } from './checker/check'
-import type { MemoryStore, SessionRecord } from './memory/store'
+import { continueMessage } from './memory/continue'
+import type { Secret } from './memory/history'
 import { TutorError, type ImageInput, type SendInput, type TutorLike } from './tutor/tutor'
 
 export const REVEAL_AFTER_ATTEMPTS = 3
@@ -32,10 +34,18 @@ const FALLBACK_PROBLEM: ProblemInfo = {
   hiddenSolution: ''
 }
 
+/** Where sessions are saved: the history of whoever is using Clueless now. */
+export interface SessionMemory {
+  save(session: SavedSession): void
+  saveSecret(id: string, secret: Secret): void
+  historySummary(): string | undefined
+}
+
 export interface ControllerDeps {
   /** A fresh tutor for a new problem, or null when there's no API key. */
   makeTutor(): TutorLike | null
-  memory: MemoryStore
+  /** The current history (it changes when another student signs in). */
+  memory(): SessionMemory
   /** Capture the screen for "Check my work". */
   captureScreen(): Promise<ImageInput | null>
   emit(view: SessionView | null): void
@@ -56,7 +66,7 @@ export class SessionController {
   private pendingCheck: AnswerCheck | null = null
   private pendingNotes: string[] = []
   private lastFailed: (() => Promise<void>) | null = null
-  private recorded = false
+  private savedSecret = '' // the secret as last saved, to skip saving it again unchanged
   private queue: Promise<void> = Promise.resolve()
 
   constructor(private readonly deps: ControllerDeps) {}
@@ -68,14 +78,13 @@ export class SessionController {
   /** Start a new problem from a screenshot and/or typed text. */
   startProblem(input: { image?: ImageInput; text?: string }): Promise<void> {
     return this.enqueue(async () => {
-      this.finishRecord()
       const tutor = this.deps.makeTutor()
       this.tutor = tutor
       this.problem = null
       this.plan = []
       this.pendingCheck = null
       this.pendingNotes = []
-      this.recorded = false
+      this.savedSecret = ''
       this.view = emptyView()
       if (!tutor) {
         this.view.error = 'Add your Claude API key first (see the banner above).'
@@ -84,7 +93,7 @@ export class SessionController {
       void this.deps.stuck.start()
       const run = async (): Promise<void> => {
         const reply = await this.call('Reading your screen…', () =>
-          tutor.start({ ...input, history: this.deps.memory.historySummary() })
+          tutor.start({ ...input, history: this.deps.memory().historySummary() })
         )
         if (!reply) return
         // Still no problem after the tutor's retry: fill in a stand-in so the session (answer box,
@@ -106,6 +115,7 @@ export class SessionController {
       const result = check ? checkAnswer(check, text) : null
       view.thread.push({ id: randomUUID(), role: 'student', text, as, check: result, at: Date.now() })
       this.emit()
+      this.persist()
 
       const notes = this.takeNotes()
       if (result) notes.push(`[CHECKER] ${result.detail}`)
@@ -119,7 +129,6 @@ export class SessionController {
     return this.enqueue(async () => {
       const view = this.view
       if (action === 'new') {
-        this.finishRecord()
         this.deps.stuck.stop()
         this.view = null
         this.tutor = null
@@ -186,8 +195,49 @@ export class SessionController {
         intent === 'stuck' ? `Stuck on step ${n}` : intent === 'revisit' ? `Back to step ${n}` : `I think I've done step ${n}`
       view.thread.push({ id: randomUUID(), role: 'student', text: said, as: 'text', check: null, at: Date.now() })
       this.emit()
+      this.persist()
       const input: SendInput = { tag: STEP_TAG[intent], text: `step ${n}: ${step.text}`, notes: this.takeNotes() }
       await this.attempt(() => this.round(input, intent === 'stuck' ? 'Thinking of a hint…' : 'Thinking…'))
+    })
+  }
+
+  /**
+   * Pick up a saved session: its conversation comes back on screen and a new conversation with
+   * Claude continues it. `hidden` is what Clueless knew (or the server's placeholder for it).
+   */
+  resume(given: SavedSession, hidden: string): Promise<void> {
+    return this.enqueue(async () => {
+      const saved = structuredClone(given) // the session's thread grows from here; the caller's copy doesn't
+      const tutor = this.deps.makeTutor()
+      this.tutor = tutor
+      const problem = { subject: saved.subject, title: saved.title, summary: saved.summary, language: null }
+      this.problem = { ...problem, hiddenSolution: '' } // the reply to [CONTINUE] has no problem; we know it already
+      this.plan = saved.plan
+      this.pendingCheck = null
+      this.pendingNotes = []
+      this.savedSecret = ''
+      this.view = {
+        ...emptyView(),
+        id: saved.id,
+        startedAt: Date.parse(saved.startedAt) || Date.now(),
+        problem,
+        plan: saved.plan,
+        thread: saved.thread ?? [],
+        attempts: saved.attempts,
+        hintsUsed: saved.hintsUsed,
+        solved: saved.solved,
+        revealed: saved.revealed,
+        revealAllowed: saved.attempts >= REVEAL_AFTER_ATTEMPTS
+      }
+      if (!tutor) {
+        this.view.error = 'Add your Claude API key first (see the banner above).'
+        return this.emit()
+      }
+      void this.deps.stuck.start()
+      await this.attempt(async () => {
+        const reply = await this.call('Picking up where you left off…', () => tutor.resume(continueMessage(saved, hidden)))
+        if (reply) this.applyReply(reply)
+      })
     })
   }
 
@@ -213,6 +263,7 @@ export class SessionController {
     this.view.problem.subject = subject
     this.pendingNotes.push(`[SUBJECT] The student says this is a ${subject} problem.`)
     this.emit()
+    this.persist()
   }
 
   // ---------- internals ----------
@@ -284,8 +335,6 @@ export class SessionController {
     view.choices = turn.choices
     this.pendingCheck = turn.check
 
-    if (turn.gap && this.problem) this.deps.memory.recordGap(this.problem.subject, turn.gap)
-
     const itemId = randomUUID()
     view.thread.push({ id: itemId, role: 'tutor', turn: toTurnView(turn, animation), at: Date.now() })
 
@@ -298,38 +347,45 @@ export class SessionController {
         revealed: view.revealed,
         afterItemId: itemId
       }
-      this.finishRecord()
       this.deps.stuck.stop()
     }
     this.emit()
+    this.persist()
+    this.persistSecret()
   }
 
-  /** Save the finished (or abandoned) session to memory once. */
-  private finishRecord(): void {
+  /** Save the session as it is now, after every turn, so nothing is lost if the app quits. */
+  private persist(): void {
     const view = this.view
-    if (!view || !view.problem || this.recorded) return
-    this.recorded = true
-    const gaps = view.thread.flatMap((t) => (t.role === 'tutor' && t.turn.gap ? [t.turn.gap] : []))
-    const record: SessionRecord = {
+    if (!view?.problem) return
+    this.deps.memory().save({
       id: view.id,
       startedAt: new Date(view.startedAt).toISOString(),
-      endedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
       subject: view.problem.subject,
       title: view.problem.title,
-      attempts: view.attempts,
-      hintsUsed: view.hintsUsed,
+      summary: view.problem.summary,
       solved: view.solved,
       revealed: view.revealed,
-      gaps,
-      turns: view.thread.flatMap((t): SessionRecord['turns'] =>
-        t.role === 'tutor'
-          ? [{ role: 'tutor' as const, text: t.turn.message, kind: t.turn.kind, hintLevel: t.turn.hintLevel }]
-          : t.role === 'student'
-            ? [{ role: 'student' as const, text: t.text, as: t.as }]
-            : []
-      )
-    }
-    this.deps.memory.addSession(record)
+      attempts: view.attempts,
+      hintsUsed: view.hintsUsed,
+      gaps: view.thread.flatMap((t) => (t.role === 'tutor' && t.turn.gap ? [t.turn.gap] : [])),
+      plan: view.plan,
+      // Text only: the animations' pictures aren't kept.
+      thread: view.thread.map((t) => (t.role === 'tutor' ? { ...t, turn: { ...t.turn, visual: null, animation: null } } : t)),
+      recap: view.recap
+    })
+  }
+
+  /** The hidden solution and the full plan go to history separately, where the student can't read them. */
+  private persistSecret(): void {
+    const view = this.view
+    if (!view || !this.problem) return
+    const secret: Secret = { solution: this.problem.hiddenSolution, plan: this.plan }
+    const key = JSON.stringify(secret)
+    if (key === this.savedSecret) return
+    this.savedSecret = key
+    this.deps.memory().saveSecret(view.id, secret)
   }
 
   private takeNotes(): string[] {

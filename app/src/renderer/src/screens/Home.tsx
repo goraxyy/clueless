@@ -1,20 +1,25 @@
 // The big window's header, the small window's bar, settings, setup banners and the empty
 // "stuck on something?" screen.
-import { useRef, useState, type ButtonHTMLAttributes } from 'react'
-import type { AppStatus, StuckState } from '../../../shared/contracts'
+import { useEffect, useRef, useState, type ButtonHTMLAttributes } from 'react'
+import type { AccountView, AppStatus, StuckState } from '../../../shared/contracts'
 import { api } from '../api'
+import { usageLines } from './Account'
 import {
   BulbIcon,
   ExpandIcon,
   FileIcon,
   GapsIcon,
   GearIcon,
+  HistoryIcon,
+  TrashIcon,
   LayersIcon,
   Logo,
   MinusIcon,
   MonitorIcon,
   PlusIcon,
   PowerIcon,
+  BackIcon,
+  ChartIcon,
   SelectAreaIcon,
   SendIcon,
   SparkleIcon,
@@ -29,19 +34,21 @@ export type Glass = 'glass' | 'clear' | 'solid'
 export const GLASS_ALPHA: Record<Glass, number> = { glass: 0.62, clear: 0.38, solid: 0.96 }
 const NEXT_GLASS: Record<Glass, Glass> = { glass: 'clear', clear: 'solid', solid: 'glass' }
 
-/** The big window's top bar: your gaps, shrink to the small window, and settings on the right. */
+/** The big window's top bar: history, your gaps, shrink to the small window, and settings on the right. */
 export function Header({
   stuck,
   menuOpen,
   onToggleMenu,
   onShrink,
-  onOpenGaps
+  onOpenGaps,
+  onOpenHistory
 }: {
   stuck: StuckState | null
   menuOpen: boolean
   onToggleMenu: () => void
   onShrink: () => void
   onOpenGaps: () => void
+  onOpenHistory: () => void
 }) {
   return (
     <header className="drag relative flex h-11 shrink-0 items-center gap-2 border-b border-zinc-900/10 pl-3 pr-2 dark:border-white/10">
@@ -56,6 +63,9 @@ export function Header({
         />
       )}
       <div className="ml-auto flex items-center gap-1">
+        <HeaderButton title="History" onClick={onOpenHistory}>
+          <HistoryIcon size={15} />
+        </HeaderButton>
         <HeaderButton title="Your gaps" onClick={onOpenGaps}>
           <GapsIcon size={15} />
         </HeaderButton>
@@ -148,17 +158,20 @@ function SettingsButton({ open, onClick }: { open: boolean; onClick: () => void 
 }
 
 /**
- * Settings: transparency, a new session, quit. A card of its own that slides down: under the small
- * window (which keeps its shape), or over the big window's content, under its top bar.
+ * Settings: this week's free use, transparency, a new session, sign out, quit. A card of its own
+ * that slides down: under the small window (which keeps its shape), or over the big window's
+ * content, under its top bar.
  */
 export function SettingsMenu({
   glass,
+  account,
   onGlass,
   onNewSession,
   onClose,
   overContent
 }: {
   glass: Glass
+  account: AccountView | null // null = no Clueless account (a developer's own keys)
   onGlass: (g: Glass) => void
   onNewSession: () => void
   onClose: () => void
@@ -166,6 +179,13 @@ export function SettingsMenu({
 }) {
   const row =
     'no-drag flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] text-zinc-700 hover:bg-zinc-900/5 dark:text-zinc-200 dark:hover:bg-white/10'
+  const signedIn = account?.state === 'ready'
+  // Opening settings re-reads this week's use.
+  useEffect(() => {
+    if (signedIn) void api.accountRefresh()
+  }, [signedIn])
+  const usage = signedIn && account?.usage ? usageLines(account.usage) : null
+  const [confirmWipe, setConfirmWipe] = useState(false)
   return (
     <>
       <div className="no-drag fixed inset-0 z-10" onClick={onClose} />
@@ -175,6 +195,15 @@ export function SettingsMenu({
           overContent ? 'absolute right-2 top-[46px] w-56' : 'relative mt-1.5'
         )}
       >
+        {usage && (
+          <div className="mb-1 flex items-start gap-2.5 border-b border-zinc-900/10 px-2.5 pb-2 pt-1.5 dark:border-white/10" title={account?.email ?? undefined}>
+            <ChartIcon size={14} className="mt-0.5 shrink-0 text-zinc-500 dark:text-zinc-400" />
+            <div className="min-w-0">
+              <div className="text-[12.5px] text-zinc-800 dark:text-zinc-100">{usage.main}</div>
+              <div className="text-[11px] text-zinc-500 dark:text-zinc-400">{usage.detail}</div>
+            </div>
+          </div>
+        )}
         <button type="button" onClick={() => onGlass(NEXT_GLASS[glass])} className={row} title="Click to change how see-through the panel is">
           <LayersIcon size={14} className="shrink-0 text-zinc-500 dark:text-zinc-400" />
           Transparency
@@ -184,6 +213,24 @@ export function SettingsMenu({
           <PlusIcon size={14} className="shrink-0 text-zinc-500 dark:text-zinc-400" />
           New session
         </button>
+        <button
+          type="button"
+          onClick={() => {
+            if (!confirmWipe) return setConfirmWipe(true)
+            void api.deleteAllHistory().then(onClose)
+          }}
+          className={cx(row, confirmWipe && 'text-rose-600 dark:text-rose-400')}
+          title="Deletes every saved session and the gaps they found"
+        >
+          <TrashIcon size={14} className="shrink-0 text-zinc-500 dark:text-zinc-400" />
+          {confirmWipe ? 'Click again to delete everything' : 'Delete all history'}
+        </button>
+        {signedIn && (
+          <button type="button" onClick={() => void api.accountSignOut().then(onClose)} className={row} title={account?.email ?? undefined}>
+            <BackIcon size={14} className="shrink-0 text-zinc-500 dark:text-zinc-400" />
+            Sign out
+          </button>
+        )}
         <button
           type="button"
           onClick={() => api.quit()}

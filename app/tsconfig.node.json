@@ -12,7 +12,8 @@
     "isolatedModules": true,
     "esModuleInterop": true,
     "resolveJsonModule": true,
-    "noEmit": true
+    "noEmit": true,
+    "allowImportingTsExtensions": true
   },
   "include": ["*.mts", "src/main/**/*", "src/preload/**/*", "src/shared/**/*", "scripts/**/*"]
 }

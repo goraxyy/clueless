@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { SessionView, TutorReplyT, TutorTurn } from '../shared/contracts'
-import { MemoryStore } from './memory/store'
+import { HistoryStore } from './memory/history'
 import { SessionController } from './session'
 import type { SendInput, StartInput, TutorLike } from './tutor/tutor'
 
@@ -28,6 +28,10 @@ class FakeTutor implements TutorLike {
       recap: null
     }
   }
+  async resume(_: string): Promise<TutorReplyT> {
+    return this.send({ tag: 'STUDENT' })
+  }
+
   async send(input: SendInput): Promise<TutorReplyT> {
     this.sent.push(input)
     return this.replies.shift() ?? { problem: null, turn: turn(), recap: null }
@@ -43,11 +47,11 @@ const sudokuVisual = {
 function setup() {
   const tutor = new FakeTutor()
   const views: (SessionView | null)[] = []
-  const memory = new MemoryStore(null)
+  const memory = new HistoryStore(null)
   const stuck = { start: vi.fn(), stop: vi.fn(), snooze: vi.fn(), noteActivity: vi.fn(), noteWrongStreak: vi.fn() }
   const controller = new SessionController({
     makeTutor: () => tutor,
-    memory,
+    memory: () => memory,
     captureScreen: async () => ({ data: 'AAAA', mediaType: 'image/jpeg' }),
     emit: (v) => views.push(v),
     stuck
@@ -222,5 +226,39 @@ describe('SessionController', () => {
       await controller.step(3, 'claim')
       expect(tutor.sent.at(-1)).toMatchObject({ tag: 'STEP CLAIM', text: 'step 3: SECRET STRATEGY' })
     })
+  })
+})
+
+describe('history', () => {
+  it('saves the session after every turn, and the secrets apart from it', async () => {
+    const { controller, memory } = setup()
+    await controller.startProblem({ text: 'integrate x^2 e^x' })
+    const id = memory.list()[0].id
+    expect(memory.get(id)).toMatchObject({ title: '∫ x² eˣ dx', subject: 'math' })
+    expect(JSON.stringify(memory.get(id))).not.toContain('SECRET')
+    expect(memory.secret(id)).toEqual({ solution: 'SECRET', plan: [{ id: 1, text: 'Integrate by parts', status: 'current' }] })
+
+    await controller.send('no idea', 'text')
+    expect(memory.get(id)?.thread?.filter((t) => t.role === 'student')).toHaveLength(1)
+  })
+
+  it('continues a saved session: its conversation comes back and the tutor gets the [CONTINUE] message', async () => {
+    const { controller, memory, tutor, last } = setup()
+    await controller.startProblem({ text: 'integrate x^2 e^x' })
+    const saved = memory.get(memory.list()[0].id)!
+    let seed = ''
+    tutor.resume = async (text) => {
+      seed = text
+      return { problem: null, turn: turn({ message: 'Welcome back! Which part did you pick as u?' }), recap: null }
+    }
+
+    await controller.action('new')
+    await controller.resume(saved, '{{hidden:x}}')
+    expect(seed).toContain('[CONTINUE]')
+    expect(seed).toContain('{{hidden:x}}')
+    expect(last()).toMatchObject({ id: saved.id, problem: { title: '∫ x² eˣ dx' } })
+    expect(last().thread.length).toBe(saved.thread!.length + 1)
+    expect(memory.list()).toHaveLength(1) // the same session, not a new one
+    expect(memory.secret(saved.id)?.solution).toBe('SECRET') // continuing didn't wipe it
   })
 })

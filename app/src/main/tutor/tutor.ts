@@ -50,6 +50,8 @@ export interface SendInput {
 /** What the session controller needs from a tutor (tests swap in a fake). */
 export interface TutorLike {
   start(input: StartInput): Promise<TutorReplyT>
+  /** Pick up a saved problem in a new conversation; `seed` is the [CONTINUE] message. */
+  resume(seed: string): Promise<TutorReplyT>
   send(input: SendInput): Promise<TutorReplyT>
 }
 
@@ -130,6 +132,10 @@ export class Tutor implements TutorLike {
       { text: '[FORMAT] "problem" was null. Reply to [NEW PROBLEM] again, with "problem" filled in.' },
       'medium'
     )
+  }
+
+  resume(seed: string): Promise<TutorReplyT> {
+    return this.request({ text: seed }, 'medium')
   }
 
   async send(input: SendInput): Promise<TutorReplyT> {
@@ -351,6 +357,12 @@ export function fromWire(w: z.infer<typeof WireReply>): TutorReplyT {
 }
 
 export function errorMessage(err: unknown): string {
+  // Clueless's server explains its own refusals (signed out, weekly limit...) in words for the student.
+  if (err instanceof Anthropic.APIError) {
+    const body = err.error as { error?: { type?: unknown; message?: unknown } } | undefined
+    const type = body?.error?.type
+    if (typeof type === 'string' && type.startsWith('clueless_') && typeof body?.error?.message === 'string') return body.error.message
+  }
   if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) {
     return 'Claude rejected the credentials. Check ANTHROPIC_API_KEY, or your AWS credentials and Bedrock model access.'
   }

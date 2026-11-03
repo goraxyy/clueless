@@ -17,12 +17,14 @@ import {
   type NativeImage,
   type Rectangle
 } from 'electron'
+import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import {
   IPC,
   ISLAND_IPC,
   type AppStatus,
+  type HistoryView,
   type CodeSpot,
   type IslandView,
   type InputKind,
@@ -36,6 +38,9 @@ import {
 } from '../shared/contracts'
 import { IslandController, type IslandCapture } from '../shared/islandController'
 import { lessonFromVisual, normalizeSnippet } from '../shared/trace'
+import { Account } from './account/account'
+import { accountServer } from './account/project'
+import { EncryptedFileStorage } from './account/storage'
 import {
   activeDisplay,
   captureDisplay,
@@ -50,7 +55,9 @@ import { SelectionWatcher, type Point } from './island/selection'
 import { grayFromBitmap, spotFromSelection } from './island/spot'
 import { Tracer } from './island/tracer'
 import { PythonRunner, toCodeTrace } from './run/python'
-import { MemoryStore } from './memory/store'
+import { localHidden, serverHidden } from './memory/continue'
+import { HistoryStore } from './memory/history'
+import { HistorySync } from './memory/sync'
 import { SessionController } from './session'
 import { StuckDetector } from './stuck/detector'
 import { createTransport, providerInfo } from './tutor/provider'
@@ -100,6 +107,10 @@ let askedSelection: { text: string; from: Point; to: Point } | null = null
 let askTimer: NodeJS.Timeout | null = null
 let capturing = false
 const hotkeyErrors: string[] = []
+let account: Account | null = null // null = this build has no account server (developers use .env keys)
+let history = new HistoryStore(null) // replaced in setup by the right person's history
+let historySync: HistorySync | null = null // null: no account, history stays on this laptop
+let historyOwner: string | null = null // the account id whose history is open, 'local', or '' (nobody signed in)
 
 const userEnvFile = (): string => join(app.getPath('userData'), '.env')
 const log = (line: string): void => console.log(`[clueless] ${line}`)
@@ -122,8 +133,80 @@ function status(): AppStatus {
     screenAccess: screenAccess(),
     hotkeys: HOTKEYS,
     hotkeyErrors,
-    envFile: app.isPackaged ? userEnvFile() : join(process.cwd(), '.env')
+    envFile: app.isPackaged ? userEnvFile() : join(process.cwd(), '.env'),
+    account: account?.current ?? null
   }
+}
+
+/** The student's token for Clueless's server (undefined: no account server in this build). */
+const accessToken = (): (() => Promise<string | null>) | undefined => (account ? () => account!.accessToken() : undefined)
+
+/** Claude goes through the student's account and they haven't finished signing in: show the panel instead. */
+function needsSignIn(): boolean {
+  if (providerInfo()?.provider !== 'clueless' || account?.current.state === 'ready') return false
+  showOverlay()
+  return true
+}
+
+function historyView(): HistoryView {
+  return { sessions: history.list(), sync: historySync ? historySync.status : 'local' }
+}
+
+/**
+ * Open the history of whoever uses Clueless now: the signed-in student's (synced), or this
+ * laptop's when there's no account server (developers' own keys). Signed out: nothing.
+ */
+function openHistoryForCurrentUser(): void {
+  const usesAccount = providerInfo()?.provider === 'clueless'
+  const owner = !usesAccount ? 'local' : account?.current.state === 'ready' || account?.current.state === 'needs-invite' ? (account.userId ?? '') : ''
+  if (owner === historyOwner) return
+  historySync?.stop()
+  historySync = null
+  historyOwner = owner
+  const dir = app.getPath('userData')
+  const legacy = join(dir, 'clueless-memory.json') // the memory file from before accounts
+  const onChange = (): void => {
+    historySync?.soon()
+    toUi(IPC.history, historyView())
+  }
+  if (owner === 'local') {
+    const file = join(dir, 'history-local.json')
+    const first = !existsSync(file)
+    history = new HistoryStore(file, onChange)
+    if (first) history.importLegacy(legacy, null)
+  } else if (owner && account) {
+    history = new HistoryStore(join(dir, `history-${owner}.json`), onChange)
+    const moved = history.importLegacy(legacy, owner) // once: the first account on this laptop gets it
+    if (moved) log(`history: moved ${moved} older sessions into the account`)
+    historySync = new HistorySync(history, account.supabase, () => toUi(IPC.history, historyView()), log)
+    void historySync.sync()
+  } else {
+    history = new HistoryStore(null)
+  }
+  toUi(IPC.history, historyView())
+}
+
+/** Continue a saved session: download it if needed, then a new tutor picks it up. */
+async function continueSession(id: string): Promise<void> {
+  if (needsSignIn()) return
+  showOverlay()
+  // A secret still on this laptop has to reach the server before the server can fill it in.
+  if (historySync && history.secret(id)) await historySync.sync()
+  const saved = historySync ? await historySync.open(id) : history.get(id)
+  if (!saved?.thread) {
+    controller.fail("Couldn't open that session. Check your internet connection and try again.")
+    return
+  }
+  const hidden = historySync ? serverHidden(id) : localHidden(history.secret(id))
+  await controller.resume(saved, hidden)
+}
+
+let usageReadAt = 0
+/** Re-read this week's use now and then (each Claude request changes it). */
+function refreshUsageSoon(): void {
+  if (!account || account.current.state !== 'ready' || Date.now() - usageReadAt < 30_000) return
+  usageReadAt = Date.now()
+  void account.refresh()
 }
 
 function toUi(channel: string, payload: unknown): void {
@@ -131,7 +214,7 @@ function toUi(channel: string, payload: unknown): void {
 }
 
 function makeTutor(): Tutor | null {
-  const transport = createTransport() // Claude API or Bedrock, from the env
+  const transport = createTransport(process.env, 'tutor', accessToken()) // Clueless server, Claude API or Bedrock
   return transport ? new Tutor(transport, log) : null
 }
 
@@ -141,6 +224,7 @@ function showOverlay(): void {
   // so a full-screen browser stays in its own Space instead of being switched away from.
   overlay.show()
   overlay.focus()
+  refreshUsageSoon()
 }
 
 function toggleOverlay(): void {
@@ -241,7 +325,7 @@ async function captureScreen(): Promise<ImageInput | null> {
 }
 
 async function ask(kind: 'screen' | 'area'): Promise<void> {
-  if (capturing) return
+  if (capturing || needsSignIn()) return
   capturing = true
   try {
     loadKeys() // pick up a key added since launch
@@ -272,7 +356,7 @@ async function ask(kind: 'screen' | 'area'): Promise<void> {
 
 /** A question typed before any problem: it starts one, with the screen for context. */
 async function askWithText(text: string): Promise<void> {
-  if (capturing) return
+  if (capturing || needsSignIn()) return
   capturing = true
   try {
     loadKeys() // pick up a key added since launch
@@ -314,8 +398,8 @@ function pythonRunner(): PythonRunner {
 const islandController = new IslandController({
   makeTracer: () => {
     loadKeys() // pick up a key added since launch
-    const tutor = createTransport(process.env, 'tutor')
-    const fast = createTransport(process.env, 'fast')
+    const tutor = createTransport(process.env, 'tutor', accessToken())
+    const fast = createTransport(process.env, 'fast', accessToken())
     return tutor && fast ? new Tracer({ tutor, fast }, pythonRunner(), log) : null
   },
   capture: captureForIsland,
@@ -487,7 +571,7 @@ function hideIsland(): void {
 
 function toggleIsland(): void {
   if (island?.isVisible()) hideIsland()
-  else showIsland()
+  else if (!needsSignIn()) showIsland()
 }
 
 /** The tutor's reply to Animate plays in the visual island as soon as it arrives (once per turn). */
@@ -523,7 +607,21 @@ function setup(): void {
       process.platform === 'darwin' ? [{ role: 'appMenu' }, { role: 'editMenu' }] : [{ role: 'editMenu' }]
     )
   )
-  const store = new MemoryStore(join(app.getPath('userData'), 'clueless-memory.json'))
+  const server = accountServer()
+  if (server) {
+    account = new Account({
+      server,
+      storage: new EncryptedFileStorage(join(app.getPath('userData'), 'account.bin')),
+      openExternal: (url) => shell.openExternal(url),
+      onChange: () => {
+        toUi(IPC.status, status())
+        openHistoryForCurrentUser()
+      },
+      log
+    })
+    void account.refresh()
+  }
+  openHistoryForCurrentUser()
 
   stuck = new StuckDetector({
     thumbnail: () => grayThumbnail(activeDisplay()),
@@ -534,7 +632,7 @@ function setup(): void {
 
   controller = new SessionController({
     makeTutor,
-    memory: store,
+    memory: () => history,
     captureScreen,
     emit: (view: SessionView | null) => {
       toUi(IPC.session, view)
@@ -558,7 +656,39 @@ function setup(): void {
 
   ipcMain.handle(IPC.getStatus, () => status())
   ipcMain.handle(IPC.getSession, () => controller.current)
-  ipcMain.handle(IPC.getMemory, () => store.view())
+  ipcMain.handle(IPC.getMemory, () => history.view())
+  ipcMain.handle(IPC.getHistory, () => {
+    void historySync?.sync() // the latest from other computers arrives as an update
+    return historyView()
+  })
+  ipcMain.handle(IPC.openHistory, async (_e, id: unknown) => {
+    if (typeof id !== 'string') return null
+    return historySync ? historySync.open(id) : history.get(id)
+  })
+  ipcMain.handle(IPC.deleteHistory, (_e, id: unknown) => {
+    if (typeof id === 'string') history.remove(id)
+    return historyView()
+  })
+  ipcMain.handle(IPC.deleteAllHistory, () => {
+    history.removeAll()
+    return historyView()
+  })
+  ipcMain.on(IPC.historyContinue, (_e, id: unknown) => {
+    if (typeof id === 'string') void continueSession(id)
+  })
+  ipcMain.handle(IPC.accountGoogle, () => account?.signInWithGoogle() ?? null)
+  ipcMain.handle(IPC.accountEmail, (_e, email: unknown) => (typeof email === 'string' ? account?.sendEmailLink(email.slice(0, 320)) : null) ?? null)
+  ipcMain.handle(IPC.accountCancel, () => account?.cancel() ?? null)
+  ipcMain.handle(IPC.accountActivate, (_e, arg: { invite?: unknown; adult?: unknown }) =>
+    account && typeof arg?.invite === 'string' ? account.activate(arg.invite.slice(0, 64), arg.adult === true) : null
+  )
+  ipcMain.handle(IPC.accountSignOut, async () => {
+    const view = (await account?.signOut()) ?? null
+    void controller.action('new') // the next student starts clean
+    islandController.close()
+    return view
+  })
+  ipcMain.handle(IPC.accountRefresh, () => account?.refresh() ?? null)
   ipcMain.on(IPC.ask, (_e, mode: 'screen' | 'area') => void ask(mode === 'area' ? 'area' : 'screen'))
   ipcMain.on(IPC.askText, (_e, text: string) => {
     if (typeof text !== 'string' || !text.trim()) return
@@ -760,5 +890,7 @@ if (!app.requestSingleInstanceLock()) {
     globalShortcut.unregisterAll()
     voice?.cancelAll()
     watcher.stop()
+    account?.stop()
+    historySync?.stop()
   })
 }

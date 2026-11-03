@@ -255,7 +255,7 @@ const GAP_LABEL = {
   careless_slip: 'Careless slip'
 } as const
 
-function TutorCard({ turn, onReadAloud }: { turn: TurnView; onReadAloud: () => void }) {
+export function TutorCard({ turn, onReadAloud }: { turn: TurnView; onReadAloud: () => void }) {
   const label = KIND_LABEL[turn.kind]
   const tone =
     turn.kind === 'recall_card'
@@ -322,7 +322,7 @@ const CHECK_LABEL: Record<CheckResult['status'], [string, string]> = {
   unparseable: ["Math engine: couldn't read this as math", 'text-zinc-400']
 }
 
-function StudentLine({ text, as, check }: { text: string; as: InputKind; check: CheckResult | null }) {
+export function StudentLine({ text, as, check }: { text: string; as: InputKind; check: CheckResult | null }) {
   return (
     <div className="flex items-start gap-2 text-[12.5px]">
       <span className="mt-px shrink-0 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
