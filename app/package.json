@@ -12,16 +12,18 @@
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
     "try": "tsx scripts/try-tutor.mts",
-    "dist:mac": "electron-vite build && electron-builder --mac",
-    "dist:win": "electron-vite build && electron-builder --win",
+    "dist:mac": "electron-vite build && electron-builder --mac --publish never",
+    "dist:win": "electron-vite build && electron-builder --win --publish never",
     "trace": "tsx scripts/try-trace.mts",
     "eval": "tsx scripts/model-eval.mts",
-    "allowlist": "tsx scripts/server-allowlist.mts"
+    "allowlist": "tsx scripts/server-allowlist.mts",
+    "icon": "qlmanage -t -s 1024 -o build build/icon.svg >/dev/null && mv build/icon.svg.png build/icon.png && python3 scripts/icon-corners.py build/icon.png && sips -Z 256 build/icon.png --out ../website/icon.png >/dev/null"
   },
   "dependencies": {
     "@anthropic-ai/bedrock-sdk": "^0.35.0",
     "@anthropic-ai/sdk": "^0.135.0",
     "@supabase/supabase-js": "2.118.0",
+    "electron-updater": "6.8.11",
     "mathjs": "^15.2.0",
     "pyodide": "^314.0.7",
     "uiohook-napi": "^1.5.5",

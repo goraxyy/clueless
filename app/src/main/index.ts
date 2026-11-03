@@ -57,7 +57,9 @@ import { Tracer } from './island/tracer'
 import { PythonRunner, toCodeTrace } from './run/python'
 import { localHidden, serverHidden } from './memory/continue'
 import { HistoryStore } from './memory/history'
+import { autoUpdater } from 'electron-updater'
 import { HistorySync } from './memory/sync'
+import { Updates } from './update/updates'
 import { SessionController } from './session'
 import { StuckDetector } from './stuck/detector'
 import { createTransport, providerInfo } from './tutor/provider'
@@ -110,6 +112,7 @@ const hotkeyErrors: string[] = []
 let account: Account | null = null // null = this build has no account server (developers use .env keys)
 let history = new HistoryStore(null) // replaced in setup by the right person's history
 let historySync: HistorySync | null = null // null: no account, history stays on this laptop
+let updates: Updates | null = null // only in the installed app
 let historyOwner: string | null = null // the account id whose history is open, 'local', or '' (nobody signed in)
 
 const userEnvFile = (): string => join(app.getPath('userData'), '.env')
@@ -134,7 +137,8 @@ function status(): AppStatus {
     hotkeys: HOTKEYS,
     hotkeyErrors,
     envFile: app.isPackaged ? userEnvFile() : join(process.cwd(), '.env'),
-    account: account?.current ?? null
+    account: account?.current ?? null,
+    update: updates?.current ?? null
   }
 }
 
@@ -623,6 +627,13 @@ function setup(): void {
   }
   openHistoryForCurrentUser()
 
+  // The installed app updates itself from GitHub Releases (not in development or smoke runs).
+  if (app.isPackaged && !SMOKE) {
+    autoUpdater.logger = null // Updates logs what matters
+    updates = new Updates(autoUpdater, () => toUi(IPC.status, status()), log)
+    updates.start()
+  }
+
   stuck = new StuckDetector({
     thumbnail: () => grayThumbnail(activeDisplay()),
     windowTitles,
@@ -717,6 +728,7 @@ function setup(): void {
   })
   ipcMain.on(IPC.hide, () => overlay?.hide())
   ipcMain.on(IPC.quit, () => app.quit())
+  ipcMain.on(IPC.installUpdate, () => updates?.install())
   ipcMain.on(IPC.openScreenSettings, () => openScreenSettings())
   ipcMain.on(IPC.areaDone, (_e, rect: Rect) => resolveAreaSelection(rect))
   ipcMain.on(IPC.areaCancel, () => resolveAreaSelection(null))
@@ -892,5 +904,6 @@ if (!app.requestSingleInstanceLock()) {
     watcher.stop()
     account?.stop()
     historySync?.stop()
+    updates?.stop()
   })
 }

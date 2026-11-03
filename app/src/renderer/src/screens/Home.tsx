@@ -276,6 +276,16 @@ export function Banners({ status }: { status: AppStatus | null }) {
           </Button>
         </div>
       )}
+      {status.update?.state === 'ready' && (
+        <div className="flex items-center gap-2 border-b border-claude-200 bg-claude-50 px-3 py-2 text-xs text-claude-900 dark:border-claude-600/30 dark:bg-claude-600/10 dark:text-claude-200">
+          <span className="flex-1">
+            <span className="font-semibold">Clueless {status.update.version} is ready.</span> It installs when you restart.
+          </span>
+          <Button variant="chip" onClick={() => api.installUpdate()}>
+            Restart to update
+          </Button>
+        </div>
+      )}
       {status.hotkeyErrors.length > 0 && (
         <div className="border-b border-zinc-900/10 bg-zinc-50/70 px-3 py-1.5 text-[11px] text-zinc-500 dark:border-white/10 dark:bg-black/35 dark:text-zinc-400">
           Hotkey problem: {status.hotkeyErrors.join('; ')}. Use the buttons instead.

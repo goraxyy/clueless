@@ -12,15 +12,38 @@ files:
 asarUnpack:
   - '**/node_modules/uiohook-napi/**' # native mouse hook (noticing highlights)
   - '**/node_modules/pyodide/**' # Python for code runs: it reads its own files and runs in a worker
+# The website links to releases/latest/download/<name>, so the file names never change.
 mac:
-  target: dmg
+  target:
+    - target: dmg # what students download
+      arch: universal # one download for Apple silicon and Intel Macs
+    - target: zip # what auto-update downloads
+      arch: universal
+  # The mouse hook ships its Apple silicon and Intel builds side by side; they're the same in both halves.
+  x64ArchFiles: '**/node_modules/uiohook-napi/prebuilds/**'
+  artifactName: Clueless-mac.${ext}
+  icon: build/icon.png
   category: public.app-category.education
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  notarize: false # the release workflow turns it on once the Apple Developer keys are set
   extendInfo:
     NSMicrophoneUsageDescription: Clueless listens only while you hold the talk button.
     NSScreenCaptureUsageDescription: Clueless reads your screen only when you press the hotkey.
 win:
-  target: nsis
+  target:
+    - target: nsis
+      arch: x64
+  icon: build/icon.png
 nsis:
+  artifactName: Clueless-Setup.${ext}
   oneClick: false
   allowToChangeInstallationDirectory: true
+# Releases (and auto-updates) come from GitHub Releases on this repo.
+publish:
+  provider: github
+  owner: goraxyy
+  repo: clueless
+  releaseType: draft # the release workflow publishes it once every installer is up
 npmRebuild: false

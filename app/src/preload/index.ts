@@ -24,6 +24,7 @@ const api: CluelessApi = {
   resizeWidth: (width, anchor) => ipcRenderer.send(IPC.resizeWidth, { width, anchor }),
   hide: () => ipcRenderer.send(IPC.hide),
   quit: () => ipcRenderer.send(IPC.quit),
+  installUpdate: () => ipcRenderer.send(IPC.installUpdate),
   openScreenSettings: () => ipcRenderer.send(IPC.openScreenSettings),
   getMemory: () => ipcRenderer.invoke(IPC.getMemory),
   getHistory: () => ipcRenderer.invoke(IPC.getHistory),

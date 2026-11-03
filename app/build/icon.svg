@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Clueless app icon: the panel's logo (a magnifier with a question mark) on the brand orange.
+       Placeholder art; `npm run icon` turns it into build/icon.png for the installers. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e3957a"/>
+      <stop offset="1" stop-color="#cf6b4a"/>
+    </linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  <g transform="translate(512 512) scale(28) translate(-12 -12)" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="10.5" cy="10.5" r="6.5"/>
+    <path d="m20 20-4.8-4.8"/>
+    <path d="M8.5 9a2 2 0 1 1 2.8 1.8c-.5.3-.8.7-.8 1.2"/>
+    <path d="M10.5 14h.01"/>
+  </g>
+</svg>

@@ -110,13 +110,15 @@ How the server checks requests:
 - [ ] Done when: start a problem on one laptop, continue it on another (passes as an automated test with two laptops' histories; needs the real project to try on two machines)
 
 ### Phase 3: Install and update (M)
-- [ ] App icon and installer art
-- [ ] macOS: Apple Developer ID signing, notarization, hardened runtime, a universal build (Apple silicon and Intel)
-- [ ] Windows: a signed NSIS installer (Azure Trusted Signing or a code-signing certificate)
-- [ ] Auto-update with `electron-updater` from GitHub Releases
-- [ ] GitHub Actions: build, sign and publish both platforms on a version tag
-- [ ] Website: landing page with the demo video, download buttons for the latest release, privacy, terms
-- [ ] Done when: download from the site on a clean Mac and a clean PC, and install with no warnings
+- [x] App icon (placeholder from the panel's logo: `app/build/icon.svg`, `npm run icon`)
+- [x] macOS: one universal download (Apple silicon and Intel), hardened runtime, microphone entitlement; signing and notarizing switch on once the Apple Developer keys are in GitHub (`RELEASING.md`)
+- [ ] macOS: enroll in the Apple Developer Program (individual) and add the keys
+- [x] Windows: an NSIS installer, unsigned for the beta (the install guide covers "Run anyway"); signing before a wider launch
+- [x] Auto-update with `electron-updater` from GitHub Releases, and a "Restart to update" banner (Mac needs signing for this)
+- [x] GitHub Actions: tests on every push and pull request; on a version tag, build both installers into a draft release and publish it when both are up
+- [x] Website (`website/`, for Vercel): download buttons for the latest release, the demo video, an install guide, draft privacy and terms
+- [ ] Deploy the website to Vercel (after `CONTACT_EMAIL` is filled in)
+- [ ] Done when: download from the site on a clean Mac and a clean PC, and install with no warnings (needs the Apple keys, the first release and the live account server)
 
 ### Phase 4: First run, settings and voice through the server (M)
 - [ ] First-run walkthrough: sign in, the three permissions with live status, a sample problem

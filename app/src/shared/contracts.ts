@@ -161,7 +161,11 @@ export interface AppStatus {
   hotkeyErrors: string[]
   envFile: string // where to put API keys / AWS settings
   account: AccountView | null // null = this build has no account server
+  update: UpdateView
 }
+
+/** A new version: downloading in the background, or ready to install on restart. null = none. */
+export type UpdateView = { version: string; state: 'downloading' | 'ready' } | null
 
 // ---------- the student's account ----------
 
@@ -291,6 +295,7 @@ export const IPC = {
   accountActivate: 'account:activate', // { invite, adult }
   accountSignOut: 'account:sign-out',
   accountRefresh: 'account:refresh', // re-read this week's usage
+  installUpdate: 'app:install-update', // UI -> main (send): quit, install the new version, reopen
   // The click-through window over the student's code, for an Animate run's line highlight
   stageIsland: 'stage:island', // main -> stage window: StageIsland
   // Voice: one recording ("utterance") at a time, identified by an id the UI makes up
@@ -350,6 +355,7 @@ export interface CluelessApi {
   resizeWidth(width: number, anchor: 'left' | 'right'): void
   hide(): void
   quit(): void
+  installUpdate(): void
   openScreenSettings(): void
   getMemory(): Promise<MemoryView>
   // history
