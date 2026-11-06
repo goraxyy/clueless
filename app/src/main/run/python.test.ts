@@ -1,8 +1,11 @@
 import { join } from 'node:path'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { looksLikePython, PythonRunner, toCodeTrace } from './python'
 
 const runner = new PythonRunner(join(process.cwd(), 'node_modules', 'pyodide'))
+// Loading Python itself takes a few seconds (more on a busy or slow machine): do it once, up front,
+// so each test's own time limit covers only its run.
+beforeAll(() => runner.run('1 + 1', 60_000), 60_000)
 afterAll(() => runner.dispose())
 
 const TWO_SUM = `class Solution:

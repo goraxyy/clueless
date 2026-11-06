@@ -130,15 +130,12 @@ How the server checks requests:
 - [ ] Done when: a new student goes from download to first hint without help (needs the live server and a release)
 
 ### Phase 5: Windows parity (M)
-Test and fix each item on a real Windows 11 PC, at 100% and 150% display scaling:
-- [ ] hotkeys
-- [ ] floating over full-screen apps
-- [ ] highlight detection
-- [ ] the `Ctrl+C` side effect in terminals
-- [ ] screen capture and the line highlight
-- [ ] Python runs
-- [ ] mic and voice
-- [ ] the tray icon
+- [x] Code review of everything that differs on Windows. Fixed:
+  - reading a highlight now presses Ctrl+Insert instead of Ctrl+C, so a terminal's running program is never stopped
+  - line endings are pinned (`.gitattributes`), so shell scripts and tests behave the same on Windows
+- [x] Automatic checks on every push: unit tests on Linux and Windows, and a launch check of the real app on Windows and a Mac (every window loads, a Python run is drawn). Each run keeps a Windows installer for hands-on testing.
+- [x] `WINDOWS_TEST.md`: a 21-step sheet for a teammate's Windows 11 PC, at 100% and 150% scaling. It covers install, tray, sign-in, hotkeys, full-screen apps, highlights in every kind of app, the terminal check, the line highlight on one and two monitors, voice, history, settings and uninstall.
+- [ ] A teammate runs `WINDOWS_TEST.md` on a real PC (after go-live), and the fixes from it
 - [ ] Done when: the same demo works on both platforms
 
 ### Phase 6: Trust and running it (S–M)

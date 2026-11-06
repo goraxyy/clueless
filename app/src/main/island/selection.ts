@@ -1,6 +1,6 @@
 // Notices when the student finishes highlighting text in any app, and reads what they highlighted.
 // Runs only while the island is showing. Apps don't share their selection, so on a select gesture
-// we press Ctrl/Cmd+C for the student, read the clipboard, and put their clipboard back.
+// we press the copy shortcut for the student, read the clipboard, and put their clipboard back.
 import { clipboard, ClipboardItem, screen, type ClipboardBookmark } from 'electron'
 import { uIOhook, UiohookKey, type UiohookMouseEvent } from 'uiohook-napi'
 import { isSelectGesture, type Press } from './gesture'
@@ -24,6 +24,13 @@ export interface SelectionHandlers {
 }
 
 const LEFT_BUTTON = 1
+
+/** Cmd+C on a Mac. On Windows, Ctrl+Insert: it copies in nearly every app, and in a terminal with
+ *  nothing selected it does nothing, where Ctrl+C would stop the program that's running. */
+const COPY_KEYS = {
+  darwin: [UiohookKey.C, UiohookKey.Meta],
+  other: [UiohookKey.Insert, UiohookKey.Ctrl]
+} as const
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 export class SelectionWatcher {
@@ -88,14 +95,15 @@ export class SelectionWatcher {
     if (text) this.handlers.onSelection(text, at, e.clicks >= 2 || !downAt ? at : downAt)
   }
 
-  /** Press Ctrl/Cmd+C for the student, read what got copied, then restore their clipboard. */
+  /** Press the copy shortcut for the student, read what got copied, then restore their clipboard. */
   private async copySelection(): Promise<string | null> {
     this.probing = true
     const saved = await saveClipboard()
     const marker = `⁣clueless-${Date.now()}`
     try {
       await clipboard.writeText(marker)
-      uIOhook.keyTap(UiohookKey.C, [process.platform === 'darwin' ? UiohookKey.Meta : UiohookKey.Ctrl])
+      const [key, modifier] = COPY_KEYS[process.platform === 'darwin' ? 'darwin' : 'other']
+      uIOhook.keyTap(key, [modifier])
       for (let i = 0; i < 12; i++) {
         await sleep(40)
         const text = await clipboard.readText()
@@ -104,7 +112,7 @@ export class SelectionWatcher {
       return null // nothing was selected (the copy didn't change the clipboard)
     } finally {
       await restoreClipboard(saved)
-      await sleep(30) // swallow the key events our own Ctrl+C produced
+      await sleep(30) // swallow the key events our own copy shortcut produced
       this.probing = false
     }
   }
