@@ -219,3 +219,64 @@ describe('VoiceManager / Utterance', () => {
     expect(noKey.states[0]).toMatchObject({ state: 'error' })
   })
 })
+
+describe('with a Clueless account (no key on the laptop)', () => {
+  function tokenSetup(answer: () => Promise<{ token: string } | { error: string }>) {
+    const sockets: { url: string; protocols: string[]; headers?: Record<string, string>; s: FakeSocket }[] = []
+    const transcripts: VoiceTranscript[] = []
+    const states: VoiceStateEvent[] = []
+    const voice = new VoiceManager({
+      apiKey: () => undefined,
+      token: answer,
+      events: { transcript: (t) => transcripts.push(t), state: (e) => states.push(e) },
+      makeSocket: (url, protocols, headers) => {
+        const s = new FakeSocket(url, protocols)
+        sockets.push({ url, protocols, headers, s })
+        return s
+      }
+    })
+    return { voice, sockets, transcripts, states }
+  }
+
+  it("records straight away, then connects with the server's token as a header", async () => {
+    let give: (v: { token: string }) => void = () => {}
+    const { voice, sockets, states } = tokenSetup(() => new Promise((r) => (give = r)))
+    voice.start('u1')
+    voice.audio('u1', new Uint8Array([1, 2]).buffer) // said before the token arrived
+    expect(sockets).toHaveLength(0)
+    give({ token: 'jwt-123' })
+    await Promise.resolve()
+    expect(sockets[0].protocols).toEqual([])
+    expect(sockets[0].headers).toEqual({ Authorization: 'Bearer jwt-123' })
+    sockets[0].s.open()
+    expect(sockets[0].s.sent).toHaveLength(1) // the early audio wasn't lost
+    expect(states.at(-1)).toEqual({ id: 'u1', state: 'listening' })
+  })
+
+  it('a stop pressed before the token arrives still sends what was said', async () => {
+    let give: (v: { token: string }) => void = () => {}
+    const { voice, sockets, finals } = (() => {
+      const t = tokenSetup(() => new Promise((r) => (give = r)))
+      return { ...t, finals: () => t.transcripts.filter((x) => x.final) }
+    })()
+    voice.start('u1')
+    voice.audio('u1', new Uint8Array([1]).buffer)
+    voice.stop('u1')
+    give({ token: 'jwt' })
+    await Promise.resolve()
+    const s = sockets[0].s
+    s.open()
+    expect(s.controls()).toContain('Finalize')
+    s.results('two times x', { is_final: true, from_finalize: true })
+    expect(finals().map((t) => t.text)).toEqual(['two times x'])
+  })
+
+  it("shows the server's reason when it says no", async () => {
+    const { voice, sockets, states } = tokenSetup(async () => ({ error: "You've used this week's 300 voice messages. Type instead until Monday." }))
+    voice.start('u1')
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(sockets).toHaveLength(0)
+    expect(states.at(-1)).toEqual({ id: 'u1', state: 'error', message: "You've used this week's 300 voice messages. Type instead until Monday." })
+  })
+})

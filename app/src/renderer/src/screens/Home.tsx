@@ -167,6 +167,7 @@ export function SettingsMenu({
   account,
   onGlass,
   onNewSession,
+  onOpenSettings,
   onClose,
   overContent
 }: {
@@ -174,6 +175,7 @@ export function SettingsMenu({
   account: AccountView | null // null = no Clueless account (a developer's own keys)
   onGlass: (g: Glass) => void
   onNewSession: () => void
+  onOpenSettings: () => void
   onClose: () => void
   overContent: boolean // the big window: float over its content instead of below the bar
 }) {
@@ -204,6 +206,10 @@ export function SettingsMenu({
             </div>
           </div>
         )}
+        <button type="button" onClick={onOpenSettings} className={row} title="Voice, shortcuts, permissions and more">
+          <GearIcon size={14} className="shrink-0 text-zinc-500 dark:text-zinc-400" />
+          Settings
+        </button>
         <button type="button" onClick={() => onGlass(NEXT_GLASS[glass])} className={row} title="Click to change how see-through the panel is">
           <LayersIcon size={14} className="shrink-0 text-zinc-500 dark:text-zinc-400" />
           Transparency

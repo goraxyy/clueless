@@ -11,7 +11,9 @@ import { AccountScreen } from './screens/Account'
 import { AreaSelector } from './screens/AreaSelector'
 import { Banners, CompactBar, EmptyState, GLASS_ALPHA, Header, SettingsMenu, type Glass } from './screens/Home'
 import { GapsScreen } from './screens/Gaps'
+import { FirstRunScreen } from './screens/FirstRun'
 import { HistoryScreen } from './screens/History'
+import { SettingsScreen } from './screens/Settings'
 import { SessionScreen } from './screens/Session'
 import { VoiceStrip } from './components/MicButton'
 import { useVoiceConversation } from './voice/useVoiceConversation'
@@ -49,7 +51,7 @@ function windowMode(compact: boolean): WindowMode {
 function Overlay() {
   const [status, setStatus] = useState<AppStatus | null>(null)
   const [session, setSession] = useState<SessionView | null>(null)
-  const [screen, setScreen] = useState<'main' | 'gaps' | 'history'>('main')
+  const [screen, setScreen] = useState<'main' | 'gaps' | 'history' | 'settings'>('main')
   const [compact, setCompact] = useState(false)
   const [glass, setGlass] = useState<Glass>(loadGlass)
   const [size, setSize] = useState<PanelSize>(loadSize)
@@ -104,6 +106,13 @@ function Overlay() {
   const toggleCompact = (): void => {
     setMenu(false)
     setCompactMode(!compact)
+  }
+
+  // Settings → Settings…: the full settings screen, in the big window.
+  const openSettings = (): void => {
+    setMenu(false)
+    if (compact) setCompactMode(false)
+    setScreen('settings')
   }
 
   // Settings → New session: drop the problem and any Ask, back to the start.
@@ -236,7 +245,7 @@ function Overlay() {
           />
         )}
         {menu && !compact && (
-          <SettingsMenu glass={glass} account={status?.account ?? null} onGlass={changeGlass} onNewSession={newSession} onClose={() => setMenu(false)} overContent />
+          <SettingsMenu glass={glass} account={status?.account ?? null} onGlass={changeGlass} onNewSession={newSession} onOpenSettings={openSettings} onClose={() => setMenu(false)} overContent />
         )}
         {!compact && (
           <>
@@ -245,6 +254,10 @@ function Overlay() {
               <div className="panel-main">
                 {signIn ? (
                   <AccountScreen account={signIn} />
+                ) : status?.firstRun ? (
+                  <FirstRunScreen status={status} />
+                ) : screen === 'settings' && status ? (
+                  <SettingsScreen status={status} glass={glass} onGlass={changeGlass} onBack={() => setScreen('main')} />
                 ) : screen === 'history' ? (
                   <HistoryScreen onBack={() => setScreen('main')} />
                 ) : screen === 'gaps' ? (
@@ -267,7 +280,7 @@ function Overlay() {
       </div>
       {/* The small window keeps its shape: settings slide down as a card of their own under it. */}
       {menu && compact && (
-        <SettingsMenu glass={glass} account={status?.account ?? null} onGlass={changeGlass} onNewSession={newSession} onClose={() => setMenu(false)} overContent={false} />
+        <SettingsMenu glass={glass} account={status?.account ?? null} onGlass={changeGlass} onNewSession={newSession} onOpenSettings={openSettings} onClose={() => setMenu(false)} overContent={false} />
       )}
       </div>
       {!compact && <ResizeGrips panel={panel} size={size} onSize={changeSize} />}

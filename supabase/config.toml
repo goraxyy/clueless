@@ -428,3 +428,7 @@ enabled = true
 # legacy JWT secret and the newer signing keys, so the gateway check is off.
 [functions.ai]
 verify_jwt = false
+
+# Voice: Deepgram tokens and (when switched on) ElevenLabs. Checks the student's token itself.
+[functions.voice]
+verify_jwt = false

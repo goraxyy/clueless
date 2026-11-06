@@ -87,7 +87,7 @@ export class SessionController {
       this.savedSecret = ''
       this.view = emptyView()
       if (!tutor) {
-        this.view.error = 'Add your Claude API key first (see the banner above).'
+        this.view.error = "Clueless isn't connected to Claude yet (see the banner above)."
         return this.emit()
       }
       void this.deps.stuck.start()
@@ -230,7 +230,7 @@ export class SessionController {
         revealAllowed: saved.attempts >= REVEAL_AFTER_ATTEMPTS
       }
       if (!tutor) {
-        this.view.error = 'Add your Claude API key first (see the banner above).'
+        this.view.error = "Clueless isn't connected to Claude yet (see the banner above)."
         return this.emit()
       }
       void this.deps.stuck.start()

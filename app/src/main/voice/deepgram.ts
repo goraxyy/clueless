@@ -1,7 +1,8 @@
 // Speech to text with Deepgram's streaming API. One Utterance = one press of the mic: the UI streams
 // MediaRecorder chunks (webm/opus, which Deepgram detects on its own), we send back live text, and
 // when the student pauses we send the final transcript once and close the connection.
-// The API key stays here in the main process. No Electron imports, so it's unit-testable.
+// It connects with a developer's own key (.env), or with a 30-second token from Clueless's server, so
+// students have no key at all. Either way it stays in the main process. No Electron imports (testable).
 import type { VoiceStateEvent, VoiceTranscript } from '../../shared/contracts'
 
 /** The bits of a WebSocket we use (Node's built-in WebSocket fits). */
@@ -16,7 +17,11 @@ export interface SocketLike {
   close(code?: number): void
 }
 
-export type SocketFactory = (url: string, protocols: string[]) => SocketLike
+/** headers: Node's WebSocket can send them (browsers can't); used for the server's tokens. */
+export type SocketFactory = (url: string, protocols: string[], headers?: Record<string, string>) => SocketLike
+
+/** A developer's own Deepgram key, or a short-lived token from Clueless's server. */
+export type DeepgramAuth = { key: string } | { token: string }
 
 export interface VoiceEvents {
   transcript(t: VoiceTranscript): void
@@ -51,9 +56,11 @@ export class Utterance {
   private timers: ReturnType<typeof setTimeout>[] = []
   private noSpeechTimer: ReturnType<typeof setTimeout> | null = null
 
+  private waiting = false // the token is on its way from the server
+  private usesKey = true
+
   constructor(
     readonly id: string,
-    private readonly apiKey: string,
     private readonly events: VoiceEvents,
     private readonly makeSocket: SocketFactory
   ) {}
@@ -62,11 +69,22 @@ export class Utterance {
     return this.finished
   }
 
-  start(): void {
+  /** Connect now, or (with null) once the server's token arrives: audio waits in the queue meanwhile. */
+  start(auth: DeepgramAuth | null): void {
+    if (this.finished) return
+    if (!auth) {
+      this.waiting = true
+      return
+    }
+    this.waiting = false
+    this.usesKey = 'key' in auth
     let socket: SocketLike
     try {
-      // Browsers and Node can't set headers on a WebSocket; Deepgram accepts the key as a subprotocol.
-      socket = this.makeSocket(DEEPGRAM_URL, ['token', this.apiKey])
+      // A key goes in as a subprotocol (what browsers can send too); a token as a bearer header.
+      socket =
+        'key' in auth
+          ? this.makeSocket(DEEPGRAM_URL, ['token', auth.key])
+          : this.makeSocket(DEEPGRAM_URL, [], { Authorization: `Bearer ${auth.token}` })
     } catch (err) {
       return this.fail(`Couldn't connect to Deepgram: ${errorText(err)}`)
     }
@@ -96,7 +114,9 @@ export class Utterance {
       if (this.finished) return
       if (this.stopping) return this.finish('done')
       if (ev.code === 1008 || ev.code === 4001 || ev.code === 4008) {
-        return this.fail('Deepgram rejected the key. Check DEEPGRAM_API_KEY in your .env file.')
+        return this.fail(
+          this.usesKey ? 'Deepgram rejected the key. Check DEEPGRAM_API_KEY in your .env file.' : "Talking to Clueless didn't work this time. Try again."
+        )
       }
       this.failOrKeep('Lost the connection to Deepgram.')
     }
@@ -118,9 +138,15 @@ export class Utterance {
     if (this.finished || this.stopping) return
     this.stopping = true
     this.clearNoSpeech()
+    if (this.waiting) return // connects once the token is here, sends what was said, then finishes
     if (!this.socket) return this.finish('no-speech')
     // Still connecting: the queued audio goes out on open, then we finalize.
     if (this.socket.readyState === OPEN) this.finalizeSoon()
+  }
+
+  /** The server said no (signed out, this week's voice messages used up...). */
+  refuse(message: string): void {
+    this.fail(message)
   }
 
   /** Drop the utterance: no transcript is sent. */
@@ -253,7 +279,10 @@ export class VoiceManager {
 
   constructor(
     private readonly deps: {
+      /** A developer's own key (.env). */
       apiKey: () => string | undefined
+      /** With a Clueless account and no key of your own: a token from the server for each recording. */
+      token?: () => Promise<{ token: string } | { error: string }>
       events: VoiceEvents
       makeSocket: SocketFactory
     }
@@ -263,6 +292,18 @@ export class VoiceManager {
     if (typeof id !== 'string' || !ID.test(id)) return
     this.cancelAll() // a new press replaces whatever was open
     const key = this.deps.apiKey()
+    const token = this.deps.token
+    if (!key && token) {
+      // Start recording straight away; the audio waits until the token arrives (a fraction of a second).
+      const utterance = new Utterance(id, this.deps.events, this.deps.makeSocket)
+      this.current = utterance
+      utterance.start(null)
+      token().then(
+        (got) => ('token' in got ? utterance.start(got) : utterance.refuse(got.error)),
+        () => utterance.refuse("Couldn't reach Clueless. Check your internet connection.")
+      )
+      return
+    }
     if (!key) {
       this.deps.events.state({
         id,
@@ -271,9 +312,9 @@ export class VoiceManager {
       })
       return
     }
-    const utterance = new Utterance(id, key, this.deps.events, this.deps.makeSocket)
+    const utterance = new Utterance(id, this.deps.events, this.deps.makeSocket)
     this.current = utterance
-    utterance.start()
+    utterance.start({ key })
   }
 
   audio(id: unknown, chunk: unknown): void {

@@ -188,6 +188,10 @@ export interface UsageState {
   asks_limit: number
   dollars_used: number
   dollars_limit: number
+  listens_used?: number
+  listens_limit?: number
+  speech_characters_used?: number
+  speech_characters_limit?: number
   requests_last_minute: number
   requests_per_minute: number
   resets_at: string

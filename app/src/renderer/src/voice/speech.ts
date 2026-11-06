@@ -53,6 +53,7 @@ export function createBrowserSpeech(
   let generation = 0 // bumps on every speak/stop; callbacks from older speech are ignored
   let poll: ReturnType<typeof setInterval> | null = null
   let voice: SpeechSynthesisVoice | null = null
+  let voiceFor: string | null = null // the voice name chosen in settings when `voice` was picked
   let rate = 1
 
   const set = (next: Partial<SpeechSnapshot>): void => {
@@ -102,7 +103,12 @@ export function createBrowserSpeech(
 
     void voicesReady().then(() => {
       if (gen !== generation) return
-      voice ??= pickVoice(synth.getVoices(), lang)
+      const wanted = chosenVoice()
+      if (!voice || voiceFor !== wanted) {
+        const voices = synth.getVoices()
+        voice = (wanted && voices.find((v) => v.name === wanted)) || pickVoice(voices, lang)
+        voiceFor = wanted
+      }
 
       const sayChunk = (i: number): void => {
         if (gen !== generation) return
@@ -177,6 +183,16 @@ export function createBrowserSpeech(
       listeners.add(cb)
       return () => listeners.delete(cb)
     }
+  }
+}
+
+/** The computer voice picked in settings ("" = choose automatically). */
+export const VOICE_KEY = 'clueless.systemVoice'
+function chosenVoice(): string {
+  try {
+    return localStorage.getItem(VOICE_KEY) ?? ''
+  } catch {
+    return ''
   }
 }
 

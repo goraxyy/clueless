@@ -4,6 +4,8 @@ Students sign in to Clueless, and Claude runs on our key, here, never on their l
 
 | Piece | What it does |
 |---|---|
+| `migrations/20261105120000_voice.sql` | Voice usage: voice messages and read-aloud characters per week, counted in `usage_events`. |
+| `functions/voice/` | Voice with no keys on the laptop: a 30-second Deepgram token for each recording, and ElevenLabs read-aloud when it's switched on. |
 | `migrations/20261104120000_history.sql` | History: `sessions` (one row per problem, text only) and `session_secrets` (the hidden solution and full plan, which students can save through `save_secrets()` but never read). |
 | `migrations/20261103120000_accounts.sql` | Tables: `profiles`, `invite_codes`, `plan_limits`, `usage_events`. Functions: `activate()` (invite code + 18+), `usage_check()` and `my_usage()` (this week's use). Students can read only their own rows. |
 | `functions/ai/` | The Claude proxy. The app's Anthropic SDK points here. It checks the sign-in, the job and the weekly caps, then picks the model. It calls Claude with our key and records the tokens and cost. |
@@ -14,6 +16,10 @@ Students sign in to Clueless, and Claude runs on our key, here, never on their l
 Weekly caps for the beta: 20 problems, 60 Asks, $2 of Claude, and 30 requests a minute per student. Weeks reset Monday 00:00 New York time. Change the caps in `plan_limits`; no app release is needed.
 
 ## Going live (once the Supabase account exists)
+
+The quick way: fill in `.env` in the repo root (each line says where its value comes from), then run
+`scripts/go-live.sh`. It does steps 2 to 8 below, and puts the website on Vercel. The steps are here
+for doing them by hand.
 
 You run these. Each step is a few minutes.
 
@@ -51,6 +57,15 @@ You run these. Each step is a few minutes.
    ```
 8. **Point the app at it.** Put the project URL and the publishable key (Settings → API Keys) in `app/src/main/account/project.ts`. The publishable key is safe to ship in the app.
 9. **Try it.** Take the Claude and AWS keys out of `app/.env` (or set `CLUELESS_PROVIDER=clueless`), run `npm run dev`, then sign in and solve a problem.
+
+## Voice
+
+- **Talking to Clueless** needs `DEEPGRAM_API_KEY` as a function secret. The key must have the
+  **Member** role (Deepgram → API Keys), since it hands out short-lived tokens.
+- **Reading aloud** uses the student's own computer voice during the beta. To switch ElevenLabs on,
+  set these secrets: `CLUELESS_ELEVENLABS=on`, `ELEVENLABS_API_KEY`, and `CLUELESS_ELEVENLABS_VOICE`
+  (a voice ID from your ElevenLabs account). The app picks it up within ten minutes, with no release.
+- **Weekly caps:** `plan_limits.listens_per_week` (300) and `speech_characters_per_week` (20,000).
 
 ## Running it
 

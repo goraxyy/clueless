@@ -13,7 +13,8 @@ export interface TrayActions {
   hotkeys: { ask: string; area: string; island: string }
 }
 
-export function createTray(actions: TrayActions): Tray {
+/** The tray, and a way to show new hotkeys in its menu after the student changes them. */
+export function createTray(actions: TrayActions): { tray: Tray; setHotkeys(hotkeys: TrayActions['hotkeys']): void } {
   let icon
   if (process.platform === 'darwin') {
     icon = nativeImage.createFromDataURL(MAC1X)
@@ -25,18 +26,20 @@ export function createTray(actions: TrayActions): Tray {
 
   const tray = new Tray(icon)
   tray.setToolTip('Clueless')
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: 'Read my screen', accelerator: actions.hotkeys.ask, click: actions.ask },
-      { label: 'Select just the problem', accelerator: actions.hotkeys.area, click: actions.selectArea },
-      { label: 'Show / hide the panel', click: actions.toggle },
-      { type: 'separator' },
-      { label: 'Show / hide the island', accelerator: actions.hotkeys.island, click: actions.toggleIsland },
-      { type: 'separator' },
-      { label: 'Quit Clueless', role: 'quit', click: actions.quit }
-    ])
-  )
+  const setHotkeys = (hotkeys: TrayActions['hotkeys']): void =>
+    tray.setContextMenu(
+      Menu.buildFromTemplate([
+        { label: 'Read my screen', accelerator: hotkeys.ask, click: actions.ask },
+        { label: 'Select just the problem', accelerator: hotkeys.area, click: actions.selectArea },
+        { label: 'Show / hide the panel', click: actions.toggle },
+        { type: 'separator' },
+        { label: 'Show / hide the island', accelerator: hotkeys.island, click: actions.toggleIsland },
+        { type: 'separator' },
+        { label: 'Quit Clueless', role: 'quit', click: actions.quit }
+      ])
+    )
+  setHotkeys(actions.hotkeys)
   // Windows: a left click toggles the panel (the menu is on right click).
   if (process.platform === 'win32') tray.on('click', actions.toggle)
-  return tray
+  return { tray, setHotkeys }
 }

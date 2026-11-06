@@ -157,12 +157,26 @@ export interface AppStatus {
   region: string | null // Bedrock only
   hasDeepgramKey: boolean
   screenAccess: 'granted' | 'denied' | 'not-determined' | 'restricted' | 'unknown'
-  hotkeys: { ask: string; area: string }
+  hotkeys: Hotkeys
   hotkeyErrors: string[]
   envFile: string // where to put API keys / AWS settings
   account: AccountView | null // null = this build has no account server
   update: UpdateView
+  version: string
+  firstRun: boolean // show the walkthrough (permissions, a sample problem) before anything else
 }
+
+export type HotkeyName = 'ask' | 'area' | 'voice' | 'island'
+export type Hotkeys = Record<HotkeyName, string> // Electron accelerators, e.g. "CommandOrControl+Shift+Space"
+
+/** What macOS (or Windows) lets Clueless do. Windows grants the screen and highlights without asking. */
+export type Access = 'granted' | 'denied' | 'not-determined' | 'unknown'
+export interface PermissionsView {
+  screen: Access // reading the screen: needed
+  accessibility: Access // noticing highlights for Ask and Animate: optional
+  microphone: Access // talking to Clueless: optional
+}
+export type PermissionName = keyof PermissionsView
 
 /** A new version: downloading in the background, or ready to install on restart. null = none. */
 export type UpdateView = { version: string; state: 'downloading' | 'ready' } | null
@@ -296,6 +310,11 @@ export const IPC = {
   accountSignOut: 'account:sign-out',
   accountRefresh: 'account:refresh', // re-read this week's usage
   installUpdate: 'app:install-update', // UI -> main (send): quit, install the new version, reopen
+  setHotkey: 'settings:hotkey', // invoke { name, accelerator } -> string | null (why it can't be used)
+  getPermissions: 'permissions:get', // invoke -> PermissionsView
+  askPermission: 'permissions:ask', // invoke PermissionName -> PermissionsView (prompts, or opens System Settings)
+  finishFirstRun: 'app:first-run-done', // send
+  relaunch: 'app:relaunch', // send: quit and reopen (macOS applies Screen Recording on restart)
   // The click-through window over the student's code, for an Animate run's line highlight
   stageIsland: 'stage:island', // main -> stage window: StageIsland
   // Voice: one recording ("utterance") at a time, identified by an id the UI makes up
@@ -356,6 +375,11 @@ export interface CluelessApi {
   hide(): void
   quit(): void
   installUpdate(): void
+  setHotkey(name: HotkeyName, accelerator: string): Promise<string | null>
+  getPermissions(): Promise<PermissionsView>
+  askPermission(name: PermissionName): Promise<PermissionsView>
+  finishFirstRun(): void
+  relaunch(): void
   openScreenSettings(): void
   getMemory(): Promise<MemoryView>
   // history

@@ -121,11 +121,13 @@ How the server checks requests:
 - [ ] Done when: download from the site on a clean Mac and a clean PC, and install with no warnings (needs the Apple keys, the first release and the live account server)
 
 ### Phase 4: First run, settings and voice through the server (M)
-- [ ] First-run walkthrough: sign in, the three permissions with live status, a sample problem
-- [ ] Settings screen replacing `.env`: voice, hotkeys, Highlight switch, transparency, usage, account
-- [ ] `/tts` and `/stt-token` server functions; voice works with no keys on the laptop
-- [ ] Error messages that make sense to a student (no "check your .env")
-- [ ] Done when: a new student goes from download to first hint without help
+- [x] First-run walkthrough after sign-in: Screen Recording, Accessibility and Microphone with live ticks and an Allow button each, then a sample problem
+- [x] Settings screen replacing `.env`: account and this week's use, read-aloud on/off and the computer voice, shortcuts (click and press new keys), the Highlight switch, transparency, permissions, delete all history
+- [x] `voice` server function: a 30-second Deepgram token per recording (no key on the laptop), weekly caps for voice messages and read-aloud characters
+- [x] Read-aloud uses the computer's voice for the beta; ElevenLabs through the server is built and switched off (`CLUELESS_ELEVENLABS=on` turns it on)
+- [x] Error messages that make sense to a student (`.env` wording only shows to developers without keys)
+- [ ] Try talking to Clueless with a Deepgram key that has the Member role (the server's token needs it)
+- [ ] Done when: a new student goes from download to first hint without help (needs the live server and a release)
 
 ### Phase 5: Windows parity (M)
 Test and fix each item on a real Windows 11 PC, at 100% and 150% display scaling:

@@ -69,6 +69,8 @@ export function isMac(platform?: string): boolean {
   return (platform ?? navigator.platform).toLowerCase().includes('mac') || platform === 'darwin'
 }
 
+const ARROWS: Record<string, string> = { Up: '↑', Down: '↓', Left: '←', Right: '→' }
+
 /** "CommandOrControl+Shift+Space" -> "⌘ ⇧ Space" on macOS, "Ctrl Shift Space" elsewhere. */
 export function hotkeyLabel(accelerator: string, platform?: string): string {
   const mac = isMac(platform)
@@ -76,9 +78,10 @@ export function hotkeyLabel(accelerator: string, platform?: string): string {
     .split('+')
     .map((k) => {
       if (k === 'CommandOrControl') return mac ? '⌘' : 'Ctrl'
+      if (k === 'Control') return mac ? '⌃' : 'Ctrl'
       if (k === 'Shift') return mac ? '⇧' : 'Shift'
       if (k === 'Alt') return mac ? '⌥' : 'Alt'
-      return k
+      return ARROWS[k] ?? k
     })
     .join(mac ? ' ' : '+')
 }

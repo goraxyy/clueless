@@ -25,6 +25,9 @@ import {
   ISLAND_IPC,
   type AppStatus,
   type HistoryView,
+  type HotkeyName,
+  type Hotkeys,
+  type PermissionName,
   type CodeSpot,
   type IslandView,
   type InputKind,
@@ -60,12 +63,15 @@ import { HistoryStore } from './memory/history'
 import { autoUpdater } from 'electron-updater'
 import { HistorySync } from './memory/sync'
 import { Updates } from './update/updates'
+import { askPermission, permissions } from './permissions'
+import { DEFAULT_HOTKEYS, SettingsStore } from './settings/settings'
 import { SessionController } from './session'
 import { StuckDetector } from './stuck/detector'
 import { createTransport, providerInfo } from './tutor/provider'
 import { Tutor, type ImageInput } from './tutor/tutor'
 import { VoiceManager, type SocketLike } from './voice/deepgram'
 import { ElevenLabs } from './voice/elevenlabs'
+import { ServerVoice } from './voice/server'
 import { createTray } from './windows/tray'
 import {
   createAskButton,
@@ -84,9 +90,6 @@ import {
   setPanelMode
 } from './windows/windows'
 
-const HOTKEYS = { ask: 'CommandOrControl+Shift+Space', area: 'CommandOrControl+Shift+2' }
-const VOICE_HOTKEY = 'CommandOrControl+Shift+1'
-const ISLAND_HOTKEY = 'CommandOrControl+Shift+3'
 const ASK_BUTTON_MS = 4000
 const SMOKE = process.env.CLUELESS_SMOKE === '1'
 
@@ -109,7 +112,10 @@ let askedSelection: { text: string; from: Point; to: Point } | null = null
 let askTimer: NodeJS.Timeout | null = null
 let capturing = false
 const hotkeyErrors: string[] = []
+let settings = new SettingsStore(null) // the real one opens in setup, once the data folder is known
+let trayMenu: { setHotkeys(hotkeys: Hotkeys): void } | null = null
 let account: Account | null = null // null = this build has no account server (developers use .env keys)
+let serverVoice: ServerVoice | null = null // voice through the account server, for students without keys
 let history = new HistoryStore(null) // replaced in setup by the right person's history
 let historySync: HistorySync | null = null // null: no account, history stays on this laptop
 let updates: Updates | null = null // only in the installed app
@@ -134,11 +140,13 @@ function status(): AppStatus {
     region: ai?.region ?? null,
     hasDeepgramKey: Boolean(process.env.DEEPGRAM_API_KEY),
     screenAccess: screenAccess(),
-    hotkeys: HOTKEYS,
+    hotkeys: settings.current.hotkeys,
     hotkeyErrors,
     envFile: app.isPackaged ? userEnvFile() : join(process.cwd(), '.env'),
     account: account?.current ?? null,
-    update: updates?.current ?? null
+    update: updates?.current ?? null,
+    version: app.getVersion(),
+    firstRun: !settings.current.firstRunDone
   }
 }
 
@@ -597,7 +605,56 @@ let stuck: StuckDetector
 let voice: VoiceManager
 const keepAlive: unknown[] = [] // the tray icon disappears if it's garbage-collected
 
+const HOTKEY_ACTIONS: Record<HotkeyName, () => void> = {
+  ask: () => void ask('screen'),
+  area: () => void ask('area'),
+  voice: () => {
+    showOverlay()
+    toUi(IPC.voiceToggle, null)
+  },
+  island: () => toggleIsland()
+}
+let registered: string[] = []
+
+/** (Re)register the student's hotkeys. Ones another app already has are listed in the panel. */
+function registerHotkeys(): void {
+  for (const accelerator of registered) globalShortcut.unregister(accelerator)
+  registered = []
+  hotkeyErrors.length = 0
+  for (const [name, accelerator] of Object.entries(settings.current.hotkeys) as [HotkeyName, string][]) {
+    if (globalShortcut.register(accelerator, HOTKEY_ACTIONS[name])) registered.push(accelerator)
+    else hotkeyErrors.push(`${accelerator} is taken by another app`)
+  }
+  trayMenu?.setHotkeys(settings.current.hotkeys)
+}
+
+/** The student picked a new shortcut in settings. Returns why it can't be used, or null. */
+function setHotkey(name: HotkeyName, accelerator: unknown): string | null {
+  const problem = settings.hotkeyProblem(name, accelerator)
+  if (problem) return problem
+  const before = settings.current.hotkeys
+  settings.update({ hotkeys: { ...before, [name]: accelerator as string } })
+  registerHotkeys()
+  if (!registered.includes(accelerator as string)) {
+    settings.update({ hotkeys: before }) // another app has it: keep the old one
+    registerHotkeys()
+    return 'Another app already uses that shortcut.'
+  }
+  return null
+}
+
+/** The Highlight switch: Ask and Animate next to a highlight, or not. Remembered across launches. */
+function applyAskOnHighlight(on: boolean): void {
+  askOnHighlight = on
+  settings.update({ askOnHighlight: on })
+  if (!askOnHighlight) hideAskButton()
+  islandController.setAskOnHighlight(askOnHighlight)
+}
+
 function setup(): void {
+  settings = new SettingsStore(join(app.getPath('userData'), 'settings.json'))
+  askOnHighlight = settings.current.askOnHighlight
+  islandController.setAskOnHighlight(askOnHighlight)
   loadKeys()
   if (process.platform === 'darwin') {
     // An overlay, not a regular app: no dock icon (the menu-bar icon replaces it). Together with
@@ -624,6 +681,7 @@ function setup(): void {
       log
     })
     void account.refresh()
+    serverVoice = new ServerVoice(server, () => account!.accessToken(), fetch, log)
   }
   openHistoryForCurrentUser()
 
@@ -657,12 +715,15 @@ function setup(): void {
       loadKeys() // pick up a key added since launch
       return process.env.DEEPGRAM_API_KEY?.trim() || undefined
     },
+    token: serverVoice ? () => serverVoice!.listenToken() : undefined,
     events: {
       transcript: (t) => toUi(IPC.voiceTranscript, t),
       state: (e) => toUi(IPC.voiceState, e)
     },
     // Node's built-in WebSocket (no extra package).
-    makeSocket: (url, protocols) => new WebSocket(url, protocols) as unknown as SocketLike
+    // Node's WebSocket also takes headers (not standard, but Node's own), for the server's tokens.
+    makeSocket: (url, protocols, headers) =>
+      new WebSocket(url, (headers ? { protocols, headers } : protocols) as string[]) as unknown as SocketLike
   })
 
   ipcMain.handle(IPC.getStatus, () => status())
@@ -729,15 +790,35 @@ function setup(): void {
   ipcMain.on(IPC.hide, () => overlay?.hide())
   ipcMain.on(IPC.quit, () => app.quit())
   ipcMain.on(IPC.installUpdate, () => updates?.install())
+  ipcMain.handle(IPC.setHotkey, (_e, arg: { name?: unknown; accelerator?: unknown }) => {
+    if (!arg || !(Object.keys(DEFAULT_HOTKEYS) as unknown[]).includes(arg.name)) return 'Unknown shortcut.'
+    const problem = setHotkey(arg.name as HotkeyName, arg.accelerator)
+    toUi(IPC.status, status())
+    return problem
+  })
+  ipcMain.handle(IPC.getPermissions, () => {
+    const now = permissions()
+    if (now.accessibility === 'granted') watchHighlights() // just allowed: start noticing highlights, no restart needed
+    return now
+  })
+  ipcMain.handle(IPC.askPermission, (_e, name: unknown) =>
+    name === 'screen' || name === 'accessibility' || name === 'microphone' ? askPermission(name as PermissionName) : permissions()
+  )
+  ipcMain.on(IPC.finishFirstRun, () => {
+    settings.update({ firstRunDone: true })
+    toUi(IPC.status, status())
+  })
+  ipcMain.on(IPC.relaunch, () => {
+    app.relaunch()
+    app.exit(0)
+  })
   ipcMain.on(IPC.openScreenSettings, () => openScreenSettings())
   ipcMain.on(IPC.areaDone, (_e, rect: Rect) => resolveAreaSelection(rect))
   ipcMain.on(IPC.areaCancel, () => resolveAreaSelection(null))
 
   ipcMain.handle(ISLAND_IPC.getView, () => islandController.current)
   ipcMain.on(ISLAND_IPC.setAskOnHighlight, (_e, on: unknown) => {
-    askOnHighlight = Boolean(on)
-    if (!askOnHighlight) hideAskButton()
-    islandController.setAskOnHighlight(askOnHighlight)
+    applyAskOnHighlight(Boolean(on))
   })
   ipcMain.on(ISLAND_IPC.followUp, (_e, text: unknown) => {
     if (typeof text === 'string') void islandController.followUp(text.slice(0, 2000))
@@ -791,7 +872,10 @@ function setup(): void {
     fetch,
     log
   )
-  ipcMain.handle(IPC.voiceTts, (_e, req: unknown) => elevenLabs.speak(req))
+  // A developer's own ElevenLabs key, else the account server (which may say "use the computer's voice").
+  ipcMain.handle(IPC.voiceTts, (_e, req: unknown) =>
+    !process.env.ELEVENLABS_API_KEY?.trim() && serverVoice ? serverVoice.speak(req) : elevenLabs.speak(req)
+  )
   ipcMain.on(IPC.voiceStart, (_e, id: unknown) => voice.start(id))
   ipcMain.on(IPC.voiceAudio, (_e, arg: { id?: unknown; chunk?: unknown }) => voice.audio(arg?.id, arg?.chunk))
   ipcMain.on(IPC.voiceStop, (_e, id: unknown) => voice.stop(id))
@@ -818,14 +902,16 @@ function setup(): void {
   visual.on('will-move', () => (visualPlaced = 'fixed')) // the student dragged it: leave it there
   visual.on('move', () => sendStage()) // the arrow from the code follows it
 
-  keepAlive.push(createTray({
+  const tray = createTray({
     ask: () => void ask('screen'),
     selectArea: () => void ask('area'),
     toggle: toggleOverlay,
     toggleIsland,
     quit: () => app.quit(),
-    hotkeys: { ...HOTKEYS, island: ISLAND_HOTKEY }
-  }))
+    hotkeys: settings.current.hotkeys
+  })
+  keepAlive.push(tray.tray)
+  trayMenu = tray
 
   if (SMOKE) {
     // `CLUELESS_SMOKE=1 npm start`: load the panel and the island hidden, check both rendered, run
@@ -874,18 +960,10 @@ function setup(): void {
       showOverlay()
     }, 800)
   )
-  for (const [name, accelerator] of Object.entries(HOTKEYS)) {
-    const ok = globalShortcut.register(accelerator, () => void ask(name === 'area' ? 'area' : 'screen'))
-    if (!ok) hotkeyErrors.push(`${accelerator} is taken by another app`)
-  }
-  const voiceOk = globalShortcut.register(VOICE_HOTKEY, () => {
-    showOverlay()
-    toUi(IPC.voiceToggle, null)
-  })
-  if (!voiceOk) hotkeyErrors.push(`${VOICE_HOTKEY} is taken by another app`)
-  if (!globalShortcut.register(ISLAND_HOTKEY, toggleIsland)) hotkeyErrors.push(`${ISLAND_HOTKEY} is taken by another app`)
+  registerHotkeys()
   watchHighlights()
-  log(`ready. Ask: ${HOTKEYS.ask}  Select area: ${HOTKEYS.area}  Voice: ${VOICE_HOTKEY}  Island: ${ISLAND_HOTKEY}`)
+  const h = settings.current.hotkeys
+  log(`ready. Ask: ${h.ask}  Select area: ${h.area}  Voice: ${h.voice}  Island: ${h.island}`)
 }
 
 // Smoke runs use their own data folder, so they don't collide with a running copy (or its memory file).

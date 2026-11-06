@@ -24,7 +24,7 @@ import {
 /** One row of `usage_events`. */
 export interface UsageEvent {
   user_id: string
-  job: Job
+  job: Job | 'listen' | 'speak'
   unit: Unit | null
   model: string
   status: number
@@ -32,6 +32,7 @@ export interface UsageEvent {
   output_tokens: number
   cache_read_tokens: number
   cache_write_tokens: number
+  characters?: number // read aloud ("speak")
   cost_usd: number
 }
 
@@ -63,13 +64,18 @@ export function errorResponse(status: number, type: string, message: string): Re
   })
 }
 
+/** The signed-in student behind a request's bearer token, or null. */
+export async function studentOf(req: Request, userFor: Deps['userFor']): Promise<string | null> {
+  const token = /^Bearer\s+(.+)$/i.exec(req.headers.get('authorization') ?? '')?.[1]?.trim()
+  return token ? await userFor(token).catch(() => null) : null
+}
+
 export async function handle(req: Request, deps: Deps): Promise<Response> {
   const log = deps.log ?? (() => {})
   if (req.method !== 'POST') return errorResponse(405, 'clueless_bad_request', 'Use POST.')
   if (!new URL(req.url).pathname.endsWith('/v1/messages')) return errorResponse(404, 'clueless_bad_request', 'Unknown path.')
 
-  const token = /^Bearer\s+(.+)$/i.exec(req.headers.get('authorization') ?? '')?.[1]?.trim()
-  const userId = token ? await deps.userFor(token).catch(() => null) : null
+  const userId = await studentOf(req, deps.userFor)
   if (!userId) return errorResponse(401, 'clueless_signed_out', 'Sign in to Clueless again.')
 
   const job = req.headers.get('x-clueless-job')
