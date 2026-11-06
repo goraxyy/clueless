@@ -1,6 +1,7 @@
 # Website
 
-The download page, install guide, privacy and terms. Plain HTML and one stylesheet, no build step.
+The download page, install guide, privacy and terms. Plain HTML, one stylesheet and one small script
+(`app.js`: the scroll story and the hint ladder), no build step. Fonts come from Google Fonts.
 
 - The download buttons link to `github.com/goraxyy/clueless/releases/latest/download/Clueless-mac.dmg`
   and `.../Clueless-Setup.exe`, so they always get the newest release. They 404 until the first

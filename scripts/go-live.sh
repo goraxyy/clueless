@@ -118,7 +118,7 @@ go_website() {
   local out; out=$(mktemp -d)
   trap 'rm -rf "$out"' RETURN
   mkdir "$out/clueless" # the folder's name becomes the Vercel project's name
-  cp website/*.html website/*.css website/*.png website/vercel.json "$out/clueless/"
+  cp website/*.html website/*.css website/*.js website/*.png website/vercel.json "$out/clueless/"
   python3 - "$out/clueless" <<'PY'
 import os, sys, glob
 for page in glob.glob(os.path.join(sys.argv[1], '*.html')):

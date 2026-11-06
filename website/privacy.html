@@ -6,65 +6,71 @@
   <title>Clueless privacy</title>
   <meta name="description" content="What Clueless keeps, what it sends where, and how to delete it.">
   <link rel="icon" href="icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&family=Fraunces:ital,opsz,wght@0,9..144,400..700;1,9..144,400..700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="wrap">
-    <header class="top">
-      <img src="icon.png" alt="">
-      <a class="name" href="index.html">Clueless</a>
-      <nav>
-        <a href="install.html">Install</a>
-        <a href="privacy.html">Privacy</a>
-        <a href="terms.html">Terms</a>
-      </nav>
-    </header>
+  <div class="grain" aria-hidden="true"></div>
 
-    <!-- DRAFT for the beta: plain-language, not reviewed by a lawyer. Fill in CONTACT_EMAIL before publishing. -->
-    <main class="doc">
-      <h1>Privacy</h1>
-      <p class="updated">Beta draft. Last updated November 2026.</p>
+  <header class="nav">
+    <a class="brand" href="index.html"><img src="icon.png" alt=""><span>Clueless</span></a>
+    <nav>
+      <a class="hide-sm" href="index.html#how">How it works</a>
+      <a class="hide-sm" href="install.html">Install</a>
+      <a class="nav-cta" href="index.html#download">Download</a>
+    </nav>
+  </header>
 
-      <p>Clueless looks at your screen to help you with homework, so here is exactly what it keeps and where things go.</p>
+  <!-- DRAFT for the beta: plain-language, not reviewed by a lawyer. Fill in CONTACT_EMAIL before publishing. -->
+  <main class="doc">
+    <h1>Privacy</h1>
+    <p class="updated">Beta draft. Last updated November 2026.</p>
 
-      <h2>What we keep</h2>
-      <ul>
-        <li><b>Your account:</b> your email address (or the one from Google), when you joined, your invite code and that you confirmed you're 18 or older.</li>
-        <li><b>Your history:</b> the text of each problem session (the title, the steps, what you and Clueless wrote, the gaps it noticed) so you can read it back or continue on another computer.</li>
-        <li><b>Usage:</b> how many problems and questions you used each week and what they cost us, so we can keep the beta free and fair.</li>
-      </ul>
+    <p>Clueless looks at your screen to help you with homework, so here is exactly what it keeps and where things go.</p>
 
-      <h2>What we don't keep</h2>
-      <ul>
-        <li><b>Screenshots.</b> Clueless only takes one when you ask it to. It goes straight to the AI model for that request and is never saved, by us or in your history.</li>
-        <li><b>Your voice.</b> When you talk to Clueless, the audio is turned into text and then thrown away.</li>
-        <li>We don't sell your data and we don't show ads.</li>
-      </ul>
+    <h2>What we keep</h2>
+    <ul>
+      <li><b>Your account:</b> your email address (or the one from Google), when you joined, your invite code and that you confirmed you're 18 or older.</li>
+      <li><b>Your history:</b> the text of each problem session (the title, the steps, what you and Clueless wrote, the gaps it noticed) so you can read it back or continue on another computer.</li>
+      <li><b>Usage:</b> how many problems and questions you used each week and what they cost us, so we can keep the beta free and fair.</li>
+    </ul>
 
-      <h2>Who else handles it</h2>
-      <ul>
-        <li><b>Anthropic</b> runs Claude, the AI model behind the hints. It receives the problem, your screenshot when you ask, and the conversation. Anthropic doesn't train its models on this data.</li>
-        <li><b>Supabase</b> hosts our accounts and database.</li>
-        <li><b>Deepgram</b> turns your voice into text, and <b>ElevenLabs</b> reads replies aloud, only if you use voice.</li>
-        <li><b>GitHub</b> hosts the app downloads and updates.</li>
-      </ul>
+    <h2>What we don't keep</h2>
+    <ul>
+      <li><b>Screenshots.</b> Clueless only takes one when you ask it to. It goes straight to the AI model for that request and is never saved, by us or in your history.</li>
+      <li><b>Your voice.</b> When you talk to Clueless, the audio is turned into text and then thrown away.</li>
+      <li>We don't sell your data and we don't show ads.</li>
+    </ul>
 
-      <h2>Deleting things</h2>
-      <ul>
-        <li>Delete one session from History in the app, or everything from Settings → Delete all history. It's deleted from every computer.</li>
-        <li>To delete your whole account, email us at CONTACT_EMAIL and we'll do it within a week.</li>
-      </ul>
+    <h2>Who else handles it</h2>
+    <ul>
+      <li><b>Anthropic</b> runs Claude, the AI model behind the hints. It receives the problem, your screenshot when you ask, and the conversation. Anthropic doesn't train its models on this data.</li>
+      <li><b>Supabase</b> hosts our accounts and database.</li>
+      <li><b>Deepgram</b> turns your voice into text, and <b>ElevenLabs</b> reads replies aloud, only if you use voice.</li>
+      <li><b>GitHub</b> hosts the app downloads and updates.</li>
+    </ul>
 
-      <h2>Questions</h2>
-      <p>Email CONTACT_EMAIL.</p>
-    </main>
+    <h2>Deleting things</h2>
+    <ul>
+      <li>Delete one session from History in the app, or everything from Settings → Delete all history. It's deleted from every computer.</li>
+      <li>To delete your whole account, email us at CONTACT_EMAIL and we'll do it within a week.</li>
+    </ul>
 
-    <footer>
-      <span>Clueless, made by a small student team</span>
-      <a href="index.html">Home</a>
+    <h2>Questions</h2>
+    <p>Email CONTACT_EMAIL.</p>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <a class="brand" href="index.html"><img src="icon.png" alt=""><span>Clueless</span></a>
       <a href="install.html">Install</a>
+      <a href="privacy.html">Privacy</a>
       <a href="terms.html">Terms</a>
-    </footer>
-  </div>
+      <a href="https://github.com/goraxyy/clueless">Source</a>
+      <span>Made by a small student team</span>
+    </div>
+  </footer>
 </body>
 </html>
