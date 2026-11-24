@@ -347,3 +347,28 @@ function keepOnScreen(r: Rect, work: Rect): Rect {
     height: r.height
   }
 }
+
+/**
+ * The main window: an ordinary app window with chat, history, flashcards, profile and settings.
+ * Unlike the panel it doesn't float, so it lives in the Dock while it's open (see index.ts).
+ */
+export function createMainWindow(): BrowserWindow {
+  const win = new BrowserWindow({
+    width: 1100,
+    height: 740,
+    minWidth: 760,
+    minHeight: 520,
+    title: 'Clueless',
+    show: false,
+    backgroundColor: '#18181b',
+    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 16, y: 18 } } : {}),
+    webPreferences
+  })
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//.test(url)) void shell.openExternal(url)
+    return { action: 'deny' }
+  })
+  win.once('ready-to-show', () => win.show())
+  loadRenderer(win, 'main')
+  return win
+}

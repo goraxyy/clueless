@@ -219,3 +219,54 @@ describe('VoiceManager / Utterance', () => {
     expect(noKey.states[0]).toMatchObject({ state: 'error' })
   })
 })
+
+describe('VoiceManager signed in to Clueless (no key)', () => {
+  function signedIn(token: () => Promise<{ token: string } | { error: string }>) {
+    const sockets: FakeSocket[] = []
+    const transcripts: VoiceTranscript[] = []
+    const states: VoiceStateEvent[] = []
+    const voice = new VoiceManager({
+      apiKey: () => undefined,
+      serverToken: token,
+      events: { transcript: (t) => transcripts.push(t), state: (e) => states.push(e) },
+      makeSocket: (url, protocols) => {
+        const s = new FakeSocket(url, protocols)
+        sockets.push(s)
+        return s
+      }
+    })
+    return { voice, sockets, transcripts, states }
+  }
+
+  it('records while the token comes, then connects with it as a bearer token', async () => {
+    const { voice, sockets, transcripts } = signedIn(async () => ({ token: 'temp-1' }))
+    voice.start('u1')
+    voice.audio('u1', new Uint8Array([1]))
+    voice.stop('u1') // a quick press: released before the token arrives
+    expect(sockets).toHaveLength(0)
+    await Promise.resolve()
+    await Promise.resolve()
+    const s = sockets[0]
+    expect(s.protocols).toEqual(['bearer', 'temp-1'])
+    s.open()
+    expect(s.sent[0]).toEqual(new Uint8Array([1]))
+    expect(s.controls()).toContain('Finalize')
+    s.results('hi', { is_final: true, from_finalize: true })
+    expect(transcripts.filter((t) => t.final).map((t) => t.text)).toEqual(['hi'])
+  })
+
+  it("the server's error is shown, and a cancel before the token means no connection", async () => {
+    const a = signedIn(async () => ({ error: "You've used this month's free Clueless." }))
+    a.voice.start('u1')
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(a.states.at(-1)).toEqual({ id: 'u1', state: 'error', message: "You've used this month's free Clueless." })
+
+    const b = signedIn(async () => ({ token: 't' }))
+    b.voice.start('u2')
+    b.voice.cancel('u2')
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(b.sockets).toHaveLength(0)
+  })
+})

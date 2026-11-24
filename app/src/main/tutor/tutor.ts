@@ -351,6 +351,11 @@ export function fromWire(w: z.infer<typeof WireReply>): TutorReplyT {
 }
 
 export function errorMessage(err: unknown): string {
+  // The Clueless server's own errors (signed out, monthly limit) say what to do: show them as they are.
+  if (err instanceof Anthropic.APIError) {
+    const theirs = (err.error as { error?: { message?: unknown } } | undefined)?.error?.message
+    if (typeof theirs === 'string' && (err.status === 402 || /clueless/i.test(theirs))) return theirs
+  }
   if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) {
     return 'Claude rejected the credentials. Check ANTHROPIC_API_KEY, or your AWS credentials and Bedrock model access.'
   }

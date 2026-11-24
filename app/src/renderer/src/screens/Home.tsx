@@ -1,7 +1,7 @@
 // The big window's header, the small window's bar, settings, setup banners and the empty
 // "stuck on something?" screen.
-import { useRef, useState, type ButtonHTMLAttributes } from 'react'
-import type { AppStatus, StuckState } from '../../../shared/contracts'
+import { useEffect, useRef, useState, type ButtonHTMLAttributes, type FormEvent } from 'react'
+import type { AccountState, AccountUsage, AppStatus, StuckState } from '../../../shared/contracts'
 import { api } from '../api'
 import {
   BulbIcon,
@@ -156,13 +156,15 @@ export function SettingsMenu({
   onGlass,
   onNewSession,
   onClose,
-  overContent
+  overContent,
+  account
 }: {
   glass: Glass
   onGlass: (g: Glass) => void
   onNewSession: () => void
   onClose: () => void
   overContent: boolean // the big window: float over its content instead of below the bar
+  account?: AccountState
 }) {
   const row =
     'no-drag flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] text-zinc-700 hover:bg-zinc-900/5 dark:text-zinc-200 dark:hover:bg-white/10'
@@ -180,10 +182,15 @@ export function SettingsMenu({
           Transparency
           <span className="ml-auto capitalize text-zinc-400">{glass}</span>
         </button>
+        <button type="button" onClick={() => { onClose(); api.openMain() }} className={row} title="History, flashcards, your account and settings">
+          <ExpandIcon size={14} className="shrink-0 text-zinc-500 dark:text-zinc-400" />
+          Open Clueless
+        </button>
         <button type="button" onClick={onNewSession} className={row} title="Start over: clears the problem and any Ask">
           <PlusIcon size={14} className="shrink-0 text-zinc-500 dark:text-zinc-400" />
           New session
         </button>
+        {account?.signedIn && <AccountRows email={account.email} rowClass={row} />}
         <button
           type="button"
           onClick={() => api.quit()}
@@ -210,7 +217,8 @@ export function Banners({ status }: { status: AppStatus | null }) {
   const screenBlocked = status.platform === 'darwin' && (status.screenAccess === 'denied' || status.screenAccess === 'restricted')
   return (
     <>
-      {!status.provider && (
+      {!status.provider && status.account.configured && <SignIn />}
+      {!status.provider && !status.account.configured && (
         <div className="border-b border-claude-200 bg-claude-50/80 px-3 py-2 text-xs text-claude-900 dark:border-claude-600/30 dark:bg-claude-600/10 dark:text-claude-200">
           <span className="font-semibold">Connect Claude.</span> In{' '}
           <code className="selectable break-all font-mono">{status.envFile}</code> set{' '}
@@ -314,5 +322,116 @@ export function EmptyState({ status }: { status: AppStatus | null }) {
         </div>
       </div>
     </div>
+  )
+}
+
+/** Not signed in: email, then the 6-digit code from the email. */
+function SignIn() {
+  const [email, setEmail] = useState('')
+  const [code, setCode] = useState('')
+  const [sent, setSent] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const submit = async (e: FormEvent): Promise<void> => {
+    e.preventDefault()
+    if (busy) return
+    setBusy(true)
+    setError(null)
+    const result = sent ? await api.verifyCode(email, code) : await api.sendCode(email)
+    setBusy(false)
+    if (!result.ok) return setError(result.message)
+    if (!sent) setSent(true) // signed in: the status update replaces this banner
+  }
+
+  const input =
+    'no-drag selectable h-7 min-w-0 flex-1 rounded-md border border-claude-200 bg-white/80 px-2 text-xs text-zinc-900 outline-none focus:border-claude-400 dark:border-claude-600/40 dark:bg-black/30 dark:text-zinc-100'
+  return (
+    <form
+      onSubmit={submit}
+      className="border-b border-claude-200 bg-claude-50/80 px-3 py-2 text-xs text-claude-900 dark:border-claude-600/30 dark:bg-claude-600/10 dark:text-claude-200"
+    >
+      <div className="mb-1.5">
+        <span className="font-semibold">Sign in to Clueless.</span>{' '}
+        {sent ? <>We sent a code to {email}.</> : <>We'll email you a code.</>}
+      </div>
+      <div className="flex items-center gap-1.5">
+        {sent ? (
+          <input
+            key="code"
+            className={cx(input, 'font-mono tracking-widest')}
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            placeholder="123456"
+            value={code}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 10))}
+            autoFocus
+          />
+        ) : (
+          <input
+            key="email"
+            className={input}
+            type="email"
+            autoComplete="email"
+            placeholder="you@school.edu"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            autoFocus
+          />
+        )}
+        <Button variant="chip" type="submit" disabled={busy}>
+          {busy ? '…' : sent ? 'Sign in' : 'Send code'}
+        </Button>
+      </div>
+      {error && <div className="mt-1.5 text-rose-600 dark:text-rose-400">{error}</div>}
+      {sent && (
+        <button
+          type="button"
+          className="no-drag mt-1.5 underline decoration-claude-300 underline-offset-2"
+          onClick={() => {
+            setSent(false)
+            setCode('')
+            setError(null)
+          }}
+        >
+          Use another email
+        </button>
+      )}
+    </form>
+  )
+}
+
+/** Settings, signed in: who, the plan and this month's use, and sign out. */
+function AccountRows({ email, rowClass }: { email: string | null; rowClass: string }) {
+  const [usage, setUsage] = useState<AccountUsage | null>(null)
+  useEffect(() => {
+    let live = true
+    void api.getUsage().then((u) => live && setUsage(u))
+    return () => {
+      live = false
+    }
+  }, [])
+  const used = usage && usage.limitMicro > 0 ? Math.min(100, Math.round((usage.spentMicro / usage.limitMicro) * 100)) : null
+  return (
+    <>
+      <div className="mx-2.5 my-1 border-t border-zinc-900/10 dark:border-white/10" />
+      <div className="px-2.5 py-1 text-[11.5px] text-zinc-500 dark:text-zinc-400">
+        <div className="truncate text-zinc-700 dark:text-zinc-200">{email}</div>
+        {usage && (
+          <>
+            <div className="mt-0.5">
+              {usage.plan === 'pro' ? 'Pro' : 'Free'} · {used}% used this month
+            </div>
+            <div className="mt-1 h-1 overflow-hidden rounded-full bg-zinc-900/10 dark:bg-white/10">
+              <div className="h-full rounded-full bg-claude-500" style={{ width: `${used}%` }} />
+            </div>
+          </>
+        )}
+      </div>
+      <button type="button" onClick={() => void api.signOut()} className={rowClass}>
+        <PowerIcon size={14} className="shrink-0 text-zinc-500 dark:text-zinc-400" />
+        Sign out
+      </button>
+    </>
   )
 }

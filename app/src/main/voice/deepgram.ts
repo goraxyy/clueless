@@ -50,13 +50,33 @@ export class Utterance {
   private finished = false
   private timers: ReturnType<typeof setTimeout>[] = []
   private noSpeechTimer: ReturnType<typeof setTimeout> | null = null
+  private waiting = false // no credential yet: it's on its way from the Clueless server
 
   constructor(
     readonly id: string,
-    private readonly apiKey: string,
+    private apiKey: string,
     private readonly events: VoiceEvents,
-    private readonly makeSocket: SocketFactory
+    private readonly makeSocket: SocketFactory,
+    /** 'token': a Deepgram API key. 'bearer': a short-lived token from the Clueless server. */
+    private readonly scheme: 'token' | 'bearer' = 'token'
   ) {}
+
+  /** Record audio now and connect once the credential arrives (connectWith). */
+  awaitCredential(): void {
+    this.waiting = true
+  }
+
+  connectWith(token: string): void {
+    if (this.finished) return
+    this.waiting = false
+    this.apiKey = token
+    this.start()
+  }
+
+  /** The credential couldn't be had: end with an error. */
+  failWith(message: string): void {
+    this.fail(message)
+  }
 
   get done(): boolean {
     return this.finished
@@ -66,7 +86,7 @@ export class Utterance {
     let socket: SocketLike
     try {
       // Browsers and Node can't set headers on a WebSocket; Deepgram accepts the key as a subprotocol.
-      socket = this.makeSocket(DEEPGRAM_URL, ['token', this.apiKey])
+      socket = this.makeSocket(DEEPGRAM_URL, [this.scheme, this.apiKey])
     } catch (err) {
       return this.fail(`Couldn't connect to Deepgram: ${errorText(err)}`)
     }
@@ -118,7 +138,7 @@ export class Utterance {
     if (this.finished || this.stopping) return
     this.stopping = true
     this.clearNoSpeech()
-    if (!this.socket) return this.finish('no-speech')
+    if (!this.socket) return this.waiting ? undefined : this.finish('no-speech') // waiting: finalized on open
     // Still connecting: the queued audio goes out on open, then we finalize.
     if (this.socket.readyState === OPEN) this.finalizeSoon()
   }
@@ -254,6 +274,8 @@ export class VoiceManager {
   constructor(
     private readonly deps: {
       apiKey: () => string | undefined
+      /** Signed in to Clueless: a short-lived Deepgram token from the server (used when there's no key). */
+      serverToken?: () => Promise<{ token: string } | { error: string }> | null
       events: VoiceEvents
       makeSocket: SocketFactory
     }
@@ -263,6 +285,17 @@ export class VoiceManager {
     if (typeof id !== 'string' || !ID.test(id)) return
     this.cancelAll() // a new press replaces whatever was open
     const key = this.deps.apiKey()
+    const fromServer = key ? null : this.deps.serverToken?.()
+    if (fromServer) {
+      const utterance = new Utterance(id, '', this.deps.events, this.deps.makeSocket, 'bearer')
+      utterance.awaitCredential()
+      this.current = utterance
+      fromServer.then(
+        (got) => ('token' in got ? utterance.connectWith(got.token) : utterance.failWith(got.error)),
+        () => utterance.failWith("Couldn't reach Clueless. Check your internet connection.")
+      )
+      return
+    }
     if (!key) {
       this.deps.events.state({
         id,

@@ -15,6 +15,7 @@ import type {
 } from '../../../shared/contracts'
 import { api } from '../api'
 import {
+  CardIcon,
   CheckIcon,
   FlagIcon,
   LockIcon,
@@ -35,11 +36,14 @@ import type { VoiceConversation } from '../voice/useVoiceConversation'
 export function SessionScreen({
   session,
   onOpenGaps,
-  conv
+  conv,
+  fullThread = false
 }: {
   session: SessionView
   onOpenGaps: () => void
   conv: VoiceConversation
+  /** The main window: the whole conversation, not just the latest exchange. */
+  fullThread?: boolean
 }) {
   const ready = Boolean(session.problem) && !session.busy
   const opening = isOpeningQuestion(session)
@@ -48,7 +52,11 @@ export function SessionScreen({
     <div className="session-screen flex min-h-0 flex-col">
       {session.problem && <ProblemBar problem={session.problem} />}
       {session.plan.length > 0 && !opening && <PlanList plan={session.plan} disabled={!ready || Boolean(session.recap)} />}
-      <LatestExchange session={session} onOpenGaps={onOpenGaps} onReadAloud={conv.readAloud} />
+      {fullThread ? (
+        <FullThread session={session} onOpenGaps={onOpenGaps} onReadAloud={conv.readAloud} />
+      ) : (
+        <LatestExchange session={session} onOpenGaps={onOpenGaps} onReadAloud={conv.readAloud} />
+      )}
       {session.stuck.level === 2 && !session.busy && !session.recap && (
         <StuckBubble reason={session.stuck.reason} />
       )}
@@ -207,6 +215,47 @@ function findLastIndex<T>(list: T[], test: (item: T) => boolean): number {
   return -1
 }
 
+/** Save a reply as a flashcard: the problem (and the step, if the reply named a gap) on the front,
+ *  the reply on the back. Editable later in the main window. */
+async function saveTurn(session: SessionView, turn: TurnView): Promise<boolean> {
+  const problem = session.problem
+  const topic = turn.gap?.topic || problem?.title || 'General'
+  const front = problem ? `${problem.title}${turn.gap ? ` — ${turn.gap.topic}` : ''}\n\n${problem.summary}` : topic
+  const card = await api.addCard({ subject: problem?.subject, topic, front, back: turn.message, source: 'tutor' })
+  return Boolean(card)
+}
+
+/** Every message so far, oldest first (the main window). */
+function FullThread({
+  session,
+  onOpenGaps,
+  onReadAloud
+}: {
+  session: SessionView
+  onOpenGaps: () => void
+  onReadAloud: (markdown: string) => void
+}) {
+  return (
+    <div className="exchange space-y-3 px-3 py-3">
+      {session.thread.map((t) =>
+        t.role === 'student' ? (
+          <StudentLine key={t.id} text={t.text} as={t.as} check={t.check} />
+        ) : t.role === 'tutor' ? (
+          <div key={t.id}>
+            <TutorCard turn={t.turn} onReadAloud={() => onReadAloud(t.turn.message)} onSave={() => saveTurn(session, t.turn)} />
+            {session.recap && session.recap.afterItemId === t.id && <RecapCard recap={session.recap} onOpenGaps={onOpenGaps} />}
+          </div>
+        ) : (
+          <div key={t.id} className="text-center text-[11.5px] text-zinc-400">
+            {t.text}
+          </div>
+        )
+      )}
+      {session.busy && <BusyRow label={session.busy} />}
+    </div>
+  )
+}
+
 /** Only the student's latest input and Clueless's latest reply. */
 function LatestExchange({
   session,
@@ -232,7 +281,7 @@ function LatestExchange({
       {session.busy && <BusyRow label={session.busy} />}
       {tutor && tutor.role === 'tutor' && !pending && (
         <div className={cx('transition-opacity', session.busy && 'opacity-40')}>
-          <TutorCard turn={tutor.turn} onReadAloud={() => onReadAloud(tutor.turn.message)} />
+          <TutorCard turn={tutor.turn} onReadAloud={() => onReadAloud(tutor.turn.message)} onSave={() => saveTurn(session, tutor.turn)} />
           {session.recap && session.recap.afterItemId === tutor.id && (
             <RecapCard recap={session.recap} onOpenGaps={onOpenGaps} />
           )}
@@ -255,7 +304,8 @@ const GAP_LABEL = {
   careless_slip: 'Careless slip'
 } as const
 
-function TutorCard({ turn, onReadAloud }: { turn: TurnView; onReadAloud: () => void }) {
+function TutorCard({ turn, onReadAloud, onSave }: { turn: TurnView; onReadAloud: () => void; onSave?: () => Promise<boolean> }) {
+  const [saved, setSaved] = useState(false)
   const label = KIND_LABEL[turn.kind]
   const tone =
     turn.kind === 'recall_card'
@@ -274,6 +324,18 @@ function TutorCard({ turn, onReadAloud }: { turn: TurnView; onReadAloud: () => v
       >
         <SpeakerIcon size={13} />
       </IconButton>
+      {onSave && (
+        <IconButton
+          title={saved ? 'Saved to your flashcards' : 'Save as a flashcard'}
+          onClick={() => void onSave().then(setSaved)}
+          className={cx(
+            '!absolute bottom-7 right-1 h-6 w-6 transition-opacity focus-visible:opacity-100',
+            saved ? 'text-claude-500 opacity-100' : 'opacity-0 group-hover:opacity-100'
+          )}
+        >
+          <CardIcon size={13} />
+        </IconButton>
+      )}
       {(label || turn.hintLevel > 0 || turn.gap || turn.verdict !== 'none') && (
         <div className="mb-1 flex flex-wrap items-center gap-1.5 text-[10.5px]">
           <Verdict verdict={turn.verdict} />

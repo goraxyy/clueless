@@ -4,9 +4,18 @@ import Anthropic, { betaRefusalFallbackMiddleware } from '@anthropic-ai/sdk'
 import { AnthropicBedrockMantle } from '@anthropic-ai/bedrock-sdk'
 import type { ClaudeClient, TutorTransport } from './tutor'
 
-export type Provider = 'anthropic' | 'bedrock'
+/** 'clueless': through the Clueless server, signed in (no key on this computer). */
+export type Provider = 'anthropic' | 'bedrock' | 'clueless'
 
 type Env = Record<string, string | undefined>
+
+/** The Clueless server, when signed in. */
+export interface Hosted {
+  /** Base URL that takes Claude API paths (/v1/messages). */
+  baseURL: string
+  /** The current access token, or null once signed out. */
+  token(): Promise<string | null>
+}
 
 /** CLUELESS_PROVIDER wins; otherwise an Anthropic key means the Claude API and AWS settings mean Bedrock. */
 export function detectProvider(env: Env = process.env): Provider | null {
@@ -63,8 +72,9 @@ export interface ProviderInfo {
   region: string | null
 }
 
-export function providerInfo(env: Env = process.env): ProviderInfo | null {
-  const provider = detectProvider(env)
+/** Keys on this computer win (development); otherwise the Clueless server, when signed in. */
+export function providerInfo(env: Env = process.env, hosted?: Hosted | null): ProviderInfo | null {
+  const provider = detectProvider(env) ?? (hosted ? 'clueless' : null)
   if (!provider) return null
   return {
     provider,
@@ -80,10 +90,20 @@ export function providerInfo(env: Env = process.env): ProviderInfo | null {
  * - Bedrock: no structured outputs there, so Claude answers through a `reply` tool; refusal
  *   fallbacks run client-side through the SDK middleware (with a plain client kept as backup).
  */
-export function createTransport(env: Env = process.env, role: ModelRole = 'tutor'): (TutorTransport & ProviderInfo) | null {
-  const found = providerInfo(env)
+export function createTransport(
+  env: Env = process.env,
+  role: ModelRole = 'tutor',
+  hosted?: Hosted | null
+): (TutorTransport & ProviderInfo) | null {
+  const found = providerInfo(env, hosted)
   if (!found) return null
   const info = { ...found, model: role === 'tutor' ? found.model : found.fastModel }
+
+  if (info.provider === 'clueless' && hosted) {
+    // The same Claude API, through our server: it adds the key and keeps to the user's plan.
+    const client = new Anthropic({ apiKey: null, authToken: 'per-request', baseURL: hosted.baseURL, fetch: hostedFetch(hosted) })
+    return { ...info, client: client as unknown as ClaudeClient, mode: 'structured', serverFallbacks: supportsServerFallbacks(info.model) }
+  }
 
   if (info.provider === 'anthropic') {
     const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY })
@@ -103,5 +123,23 @@ export function createTransport(env: Env = process.env, role: ModelRole = 'tutor
     plainClient: plain as unknown as ClaudeClient,
     mode: 'tool',
     serverFallbacks: false
+  }
+}
+
+/**
+ * fetch for the Clueless server: adds the current access token to every request, since a tutor
+ * conversation can outlast one token (an hour). Signed out: a 401 the SDK won't retry.
+ */
+export function hostedFetch(hosted: Hosted, http: typeof fetch = fetch): typeof fetch {
+  return async (input, init) => {
+    const token = await hosted.token()
+    if (!token) {
+      const body = { type: 'error', error: { type: 'authentication_error', message: 'Sign in to Clueless first.' } }
+      return new Response(JSON.stringify(body), { status: 401, headers: { 'content-type': 'application/json' } })
+    }
+    const headers = new Headers(init?.headers)
+    headers.set('authorization', `Bearer ${token}`)
+    headers.delete('x-api-key')
+    return http(input, { ...init, headers })
   }
 }

@@ -5,6 +5,7 @@ import { Menu, nativeImage, Tray } from 'electron'
 import { MAC1X, MAC2X, WIN } from './trayIcons'
 
 export interface TrayActions {
+  openMain(): void
   ask(): void
   selectArea(): void
   toggle(): void
@@ -27,6 +28,8 @@ export function createTray(actions: TrayActions): Tray {
   tray.setToolTip('Clueless')
   tray.setContextMenu(
     Menu.buildFromTemplate([
+      { label: 'Open Clueless', click: actions.openMain },
+      { type: 'separator' },
       { label: 'Read my screen', accelerator: actions.hotkeys.ask, click: actions.ask },
       { label: 'Select just the problem', accelerator: actions.hotkeys.area, click: actions.selectArea },
       { label: 'Show / hide the panel', click: actions.toggle },

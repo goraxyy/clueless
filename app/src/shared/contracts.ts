@@ -150,7 +150,7 @@ export type WindowMode = 'compact' | 'expanded' | 'wide'
 
 export interface AppStatus {
   platform: string
-  provider: 'anthropic' | 'bedrock' | null // null = no Claude credentials configured yet
+  provider: 'anthropic' | 'bedrock' | 'clueless' | null // null = not signed in and no keys on this computer
   model: string | null
   region: string | null // Bedrock only
   hasDeepgramKey: boolean
@@ -158,7 +158,30 @@ export interface AppStatus {
   hotkeys: { ask: string; area: string }
   hotkeyErrors: string[]
   envFile: string // where to put API keys / AWS settings
+  account: AccountState
 }
+
+/** Signing in to Clueless. `configured` is false in a build without a server (keys in .env only). */
+export interface AccountState {
+  configured: boolean
+  signedIn: boolean
+  email: string | null
+}
+
+/** The plan and this month's spend, from the server. Amounts in millionths of a dollar. */
+export interface AccountUsage {
+  email: string | null
+  plan: 'free' | 'pro'
+  spentMicro: number
+  limitMicro: number
+  resetsAt: string // ISO time
+  /** Checkout for Pro, for this user (null when payments aren't set up on the server). */
+  upgradeUrl?: string | null
+  /** Where a Pro user manages or cancels the subscription. */
+  manageUrl?: string | null
+}
+
+export type AccountResult = { ok: true } | { ok: false; message: string }
 
 // ---------- memory ----------
 
@@ -176,6 +199,68 @@ export interface GapRecord {
 export interface MemoryView {
   gaps: GapRecord[]
   sessions: number
+}
+
+// ---------- the main window: history, flashcards, setup ----------
+
+/** A past problem, as listed in History. */
+export interface SessionSummary {
+  id: string
+  startedAt: string
+  endedAt: string
+  subject: Subject
+  title: string
+  solved: boolean
+  hintsUsed: number
+  turns: number
+}
+
+/** A past problem with its conversation (read-only: the tutor's state isn't kept). */
+export interface SessionDetail extends SessionSummary {
+  attempts: number
+  revealed: boolean
+  gaps: Gap[]
+  thread: { role: 'tutor' | 'student'; text: string; kind?: TurnKind }[]
+}
+
+/** A saved answer to review later. Reviewed with a Leitner box: right moves it up a box (seen less
+ *  often), wrong sends it back to box 1. */
+export interface Flashcard {
+  id: string
+  subject: Subject
+  topic: string // what it's about; cards are grouped by it
+  front: string // the question (Markdown)
+  back: string // the answer (Markdown)
+  source: 'tutor' | 'ask' | 'recap' | 'manual'
+  createdAt: string
+  box: number // 1..5
+  due: string // ISO time it's next shown
+  reviews: number
+}
+
+export interface FlashcardInput {
+  subject?: Subject
+  topic: string
+  front: string
+  back: string
+  source?: Flashcard['source']
+}
+
+/** What Clueless may do on this computer. macOS asks for each; elsewhere they're 'granted'. */
+export interface PermissionsState {
+  screen: AppStatus['screenAccess']
+  microphone: 'granted' | 'denied' | 'not-determined' | 'restricted' | 'unknown'
+  accessibility: boolean
+}
+
+export type PermissionKind = 'screen' | 'microphone' | 'accessibility'
+
+export interface AppSettings {
+  openAtLogin: boolean
+  /** Show the main window when Clueless starts (otherwise it starts in the menu bar). */
+  openMainOnLaunch: boolean
+  /** First-run setup (sign in, permissions) is done. */
+  setupDone: boolean
 }
 
 export interface Rect {
@@ -221,7 +306,30 @@ export const IPC = {
   voiceTranscript: 'voice:transcript', // main -> UI: VoiceTranscript
   voiceState: 'voice:state', // main -> UI: VoiceStateEvent
   voiceMicAccess: 'voice:mic-access', // UI -> main (invoke): ask the OS for the microphone -> boolean
-  voiceTts: 'voice:tts' // UI -> main (invoke): TtsRequest -> TtsResult (ElevenLabs audio)
+  voiceTts: 'voice:tts', // UI -> main (invoke): TtsRequest -> TtsResult (ElevenLabs audio)
+  // Signing in (invoke)
+  accountSendCode: 'account:send-code', // email -> AccountResult
+  accountVerify: 'account:verify', // { email, code } -> AccountResult
+  accountSignOut: 'account:sign-out', // -> void
+  accountUsage: 'account:usage', // -> AccountUsage | null
+  // The main window
+  openMain: 'main:open', // UI -> main: show the main window (from the panel or the tray)
+  showPanel: 'main:show-panel', // UI -> main: show the floating panel
+  askFromMain: 'main:ask', // UI -> main: hide the main window, then read the screen ('screen' | 'area')
+  memoryChanged: 'memory:changed', // main -> UI: history or flashcards changed
+  historyList: 'history:list', // invoke -> SessionSummary[]
+  historyGet: 'history:get', // invoke id -> SessionDetail | null
+  historyDelete: 'history:delete', // invoke id -> void
+  cardsList: 'cards:list', // invoke -> Flashcard[]
+  cardsAdd: 'cards:add', // invoke FlashcardInput -> Flashcard | null
+  cardsUpdate: 'cards:update', // invoke { id, patch } -> void
+  cardsDelete: 'cards:delete', // invoke id -> void
+  cardsReview: 'cards:review', // invoke { id, knew } -> void
+  permissions: 'app:permissions', // invoke -> PermissionsState
+  requestPermission: 'app:request-permission', // invoke PermissionKind -> PermissionsState
+  getSettings: 'settings:get', // invoke -> AppSettings
+  setSettings: 'settings:set', // invoke Partial<AppSettings> -> AppSettings
+  openExternal: 'app:open-external' // UI -> main: an https URL (upgrade, privacy)
 } as const
 
 // ---------- voice ----------
@@ -283,7 +391,29 @@ export interface CluelessApi {
   onVoiceState(cb: (e: VoiceStateEvent) => void): () => void
   onVoiceToggle(cb: () => void): () => void
   tts(req: TtsRequest): Promise<TtsResult>
+  sendCode(email: string): Promise<AccountResult>
+  verifyCode(email: string, code: string): Promise<AccountResult>
+  signOut(): Promise<void>
+  getUsage(): Promise<AccountUsage | null>
   onStageIsland(cb: (show: StageIsland) => void): () => void
+  // the main window
+  openMain(): void
+  showPanel(): void
+  askFromMain(mode: 'screen' | 'area'): void
+  onMemoryChanged(cb: () => void): () => void
+  listHistory(): Promise<SessionSummary[]>
+  getHistory(id: string): Promise<SessionDetail | null>
+  deleteHistory(id: string): Promise<void>
+  listCards(): Promise<Flashcard[]>
+  addCard(card: FlashcardInput): Promise<Flashcard | null>
+  updateCard(id: string, patch: Partial<Pick<Flashcard, 'topic' | 'front' | 'back'>>): Promise<void>
+  deleteCard(id: string): Promise<void>
+  reviewCard(id: string, knew: boolean): Promise<void>
+  getPermissions(): Promise<PermissionsState>
+  requestPermission(kind: PermissionKind): Promise<PermissionsState>
+  getSettings(): Promise<AppSettings>
+  setSettings(patch: Partial<AppSettings>): Promise<AppSettings>
+  openExternal(url: string): void
 }
 
 // ---------- the island: highlight -> Ask or Animate -> text in the panel, the animation in the visual island ----------

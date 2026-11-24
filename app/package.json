@@ -20,6 +20,8 @@
   "dependencies": {
     "@anthropic-ai/bedrock-sdk": "^0.35.0",
     "@anthropic-ai/sdk": "^0.135.0",
+    "@supabase/supabase-js": "^2.119.2",
+    "electron-updater": "^6.8.11",
     "mathjs": "^15.2.0",
     "pyodide": "^314.0.7",
     "uiohook-napi": "^1.5.5",
