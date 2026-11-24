@@ -19,7 +19,7 @@ on your screen.
 |---|---|
 | **Ali** | The idea and the docs. The app's base: the floating panel and small window, screen capture, the tutor (Claude prompt and engine), answer checks, stuck detection, gap tracking, Bedrock support, full-screen support. Highlights with Ask and Animate, the visual island, running code for real (Pyodide), the line highlight on the screen, voice in step with the animation, models per task with a test set. Repaired the PR #3 merge (PR #4). |
 | **Nurislam** | The panel's opening: asks what's tripping you up after a scan, with options. Shorter replies, a resizable panel, clickable plan steps, layout fixes, and filling in fields Claude left out instead of asking again. |
-| **Rasim** | Voice: talking to Clueless (Deepgram) and Clueless talking back (ElevenLabs). The UI pass on both windows (PR #6). |
+| **Rasim** | The idea and feature ideation. Voice in both directions (Deepgram speech-to-text, ElevenLabs spoken replies; PRs #1 and #2), the home screen and compact pill (PR #6), and the demo video in the README. |
 | **Nurassyl** | The visual engine every animation is drawn with (arrays, grids, sets, maps, plots, vectors, trees, graphs), and the first version of highlight → Ask → step-by-step trace (PR #3). |
 
 ## How it works
