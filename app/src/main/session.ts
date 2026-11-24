@@ -78,7 +78,7 @@ export class SessionController {
       this.recorded = false
       this.view = emptyView()
       if (!tutor) {
-        this.view.error = 'Add your Claude API key first (see the banner above).'
+        this.view.error = 'Sign in to Clueless first, or add a Claude key (see the banner above).'
         return this.emit()
       }
       void this.deps.stuck.start()
@@ -302,6 +302,11 @@ export class SessionController {
       this.deps.stuck.stop()
     }
     this.emit()
+  }
+
+  /** Save the current problem to History now (the app is quitting). Once per problem. */
+  saveNow(): void {
+    this.finishRecord()
   }
 
   /** Save the finished (or abandoned) session to memory once. */

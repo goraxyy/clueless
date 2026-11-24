@@ -23,6 +23,20 @@ const VOICE_SETTINGS = { stability: 0.45, similarity_boost: 0.8, use_speaker_boo
 type Env = Record<string, string | undefined>
 type Fetch = typeof fetch
 
+/** Where speech comes from: ElevenLabs with a key, or the Clueless server (which adds ours). */
+interface Conn {
+  base: string
+  auth: Record<string, string>
+  /** Tells cached voice lookups apart. */
+  id: string
+}
+
+/** The Clueless server, while signed in. */
+export interface VoiceServer {
+  baseURL: string
+  token(): Promise<string | null>
+}
+
 export class ElevenLabs {
   private voiceCache = new Map<string, Promise<string>>()
   private modelOk = new Map<string, boolean>()
@@ -30,14 +44,23 @@ export class ElevenLabs {
   constructor(
     private readonly env: () => Env,
     private readonly http: Fetch = fetch,
-    private readonly log: (line: string) => void = () => {}
+    private readonly log: (line: string) => void = () => {},
+    private readonly server: () => VoiceServer | null = () => null
   ) {}
+
+  private async conn(env: Env): Promise<Conn | null> {
+    const key = env.ELEVENLABS_API_KEY?.trim()
+    if (key) return { base: API, auth: { 'xi-api-key': key }, id: key.slice(-6) }
+    const server = this.server()
+    const token = server && (await server.token())
+    return server && token ? { base: `${server.baseURL}/elevenlabs`, auth: { authorization: `Bearer ${token}` }, id: 'clueless' } : null
+  }
 
   async speak(req: unknown): Promise<TtsResult> {
     const input = validate(req)
     if (!input) return { ok: false, reason: 'error', message: 'Nothing to say.' }
     const env = this.env()
-    const key = env.ELEVENLABS_API_KEY?.trim()
+    const key = await this.conn(env)
     if (!key) return { ok: false, reason: 'no-key', message: 'No ELEVENLABS_API_KEY set.' }
 
     try {
@@ -62,7 +85,7 @@ export class ElevenLabs {
         if (!/paid_plan_required|library voices/i.test(detail)) return fail(res.status, detail)
         const sub = await this.voice(key, FREE_VOICE)
         this.log(`elevenlabs: "${env.ELEVENLABS_VOICE}" needs a paid ElevenLabs plan, using a free voice instead`)
-        this.voiceCache.set(`${key.slice(-6)}:${env.ELEVENLABS_VOICE?.trim() || ''}`, Promise.resolve(sub))
+        this.voiceCache.set(`${key.id}:${env.ELEVENLABS_VOICE?.trim() || ''}`, Promise.resolve(sub))
         res = await this.convert(key, sub, model, input)
       }
       if (!res.ok) return fail(res.status, await res.text().catch(() => ''))
@@ -72,15 +95,16 @@ export class ElevenLabs {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       if (message.startsWith('voice:')) return { ok: false, reason: 'error', message: message.slice(6) }
+      if (message.startsWith('no-key:')) return { ok: false, reason: 'no-key', message: 'Spoken replies are not set up on the Clueless server.' }
       return { ok: false, reason: 'error', message: "Couldn't reach ElevenLabs. Check your internet connection." }
     }
   }
 
-  private convert(key: string, voiceId: string, model: string, input: TtsRequest): Promise<Response> {
+  private convert(key: Conn, voiceId: string, model: string, input: TtsRequest): Promise<Response> {
     const useModel = this.modelOk.get(model) === false ? FALLBACK_MODEL : model
-    return this.http(`${API}/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`, {
+    return this.http(`${key.base}/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`, {
       method: 'POST',
-      headers: { 'xi-api-key': key, 'Content-Type': 'application/json', Accept: 'audio/mpeg' },
+      headers: { ...key.auth, 'Content-Type': 'application/json', Accept: 'audio/mpeg' },
       body: JSON.stringify({
         text: input.text,
         model_id: useModel,
@@ -94,8 +118,8 @@ export class ElevenLabs {
   }
 
   /** ELEVENLABS_VOICE can be a voice ID or a name ("Talia"); empty picks a warm default. */
-  private voice(key: string, wanted: string): Promise<string> {
-    const cacheKey = `${key.slice(-6)}:${wanted}`
+  private voice(key: Conn, wanted: string): Promise<string> {
+    const cacheKey = `${key.id}:${wanted}`
     let found = this.voiceCache.get(cacheKey)
     if (!found) {
       found = this.findVoice(key, wanted)
@@ -105,15 +129,16 @@ export class ElevenLabs {
     return found
   }
 
-  private async findVoice(key: string, wanted: string): Promise<string> {
+  private async findVoice(key: Conn, wanted: string): Promise<string> {
     if (/^[A-Za-z0-9]{20}$/.test(wanted)) return wanted
     const params = new URLSearchParams({ page_size: '100' })
     if (wanted === FREE_VOICE) params.set('voice_type', 'default') // voices every plan can use
     else if (wanted) params.set('search', wanted)
-    const res = await this.http(`${API}/v2/voices?${params}`, {
-      headers: { 'xi-api-key': key },
+    const res = await this.http(`${key.base}/v2/voices?${params}`, {
+      headers: key.auth,
       signal: AbortSignal.timeout(TIMEOUT_MS)
     })
+    if (res.status === 503 && key.id === 'clueless') throw new Error('no-key:') // the server has no ElevenLabs key
     if (res.status === 401) throw new Error('voice:ElevenLabs rejected the key. Check ELEVENLABS_API_KEY in your .env file.')
     if (!res.ok) throw new Error(`voice:ElevenLabs couldn't list voices (${res.status}).`)
     const body = (await res.json()) as { voices?: { voice_id: string; name: string }[] }
@@ -156,7 +181,10 @@ function fail(status: number, detail: string): TtsResult {
   // ElevenLabs explains most errors itself: {"detail":{"message":"..."}}.
   let theirs = ''
   try {
-    const d = (JSON.parse(detail) as { detail?: { message?: string } | string }).detail
+    const body = JSON.parse(detail) as { detail?: { message?: string } | string; error?: { message?: string } }
+    // The Clueless server's own errors (monthly limit) say what to do: show them as they are.
+    if (body.error?.message) return { ok: false, reason: 'error', message: body.error.message }
+    const d = body.detail
     theirs = typeof d === 'string' ? d : (d?.message ?? '')
   } catch {
     // not JSON

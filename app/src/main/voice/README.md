@@ -1,27 +1,21 @@
-# Voice (to build)
+# Voice
 
-Everything else is wired up. Voice plugs in here and in `src/renderer/src/components/MicButton.tsx`.
+Two halves, both with their keys kept in the main process (`app/.env`), never in the UI.
 
-**Goal (see DESIGN.md):**
-- **Press to talk:** recording stops on its own when you pause.
-- **Think-aloud mode:** the student explains their plan out loud, and Clueless only speaks up if something's off.
+**Talking to Clueless** (`deepgram.ts`, needs `DEEPGRAM_API_KEY`)
+- The mic button (or `Cmd/Ctrl + Shift + 1`) records in the UI (`renderer/src/voice/useVoiceInput.ts`)
+  and streams the audio here.
+- This file forwards it to Deepgram over a WebSocket and sends the words back as they're heard.
+- Recording stops on its own when you pause. What you said is sent exactly like a typed message.
 
-## Plan
+**Clueless talking back** (`elevenlabs.ts`, `ELEVENLABS_API_KEY`, optional)
+- The UI asks for one piece of text at a time (`renderer/src/voice/speech.ts`); this file turns it into
+  audio with ElevenLabs.
+- `ELEVENLABS_VOICE` picks the voice by name or ID. A voice the plan doesn't include falls back to a
+  free one, and a model the plan doesn't include falls back to the fast one.
+- No key, a rejected key, or no characters left: the UI uses the computer's own voice (and, when
+  something went wrong, says what).
+- A key changed in `.env` is picked up without restarting the app.
 
-1. **UI (`MicButton.tsx`)**
-   - Get the mic with `navigator.mediaDevices.getUserMedia({ audio: true })`.
-   - Record it with `MediaRecorder` (`audio/webm;codecs=opus`, `timeslice` 250 ms).
-   - Send each chunk to the main process with `ipcRenderer.send(IPC.voiceAudio, arrayBuffer)`. Expose this in `src/preload/index.ts` and add it to `CluelessApi` in `src/shared/contracts.ts`.
-2. **Main (`src/main/voice/deepgram.ts`)**
-   - Open a WebSocket to `wss://api.deepgram.com/v1/listen?model=nova-3&smart_format=true&interim_results=true&endpointing=400&utterance_end_ms=1200`.
-   - Authenticate with the header `Authorization: Token ${process.env.DEEPGRAM_API_KEY}` (the `ws` package supports headers). The key stays in the main process.
-   - Forward the audio chunks. Send `{"type":"KeepAlive"}` every 5 s while idle, and `{"type":"CloseStream"}` to stop.
-   - On each `Results` message, send `IPC.voiceTranscript` `{ text, final: is_final }` to the overlay.
-   - On `speech_final` or `UtteranceEnd`, the utterance is done.
-3. **UI again:** `onTranscript(text, final)` puts the text in the answer box. When it's final and the student has paused, send it.
-4. **macOS:**
-   - Call `systemPreferences.askForMediaAccess('microphone')` before the first recording.
-   - The packaged app already has `NSMicrophoneUsageDescription` (`electron-builder.yml`).
-5. **Hotkey:** register `CommandOrControl+Shift+1` in `src/main/index.ts` (next to the others) to toggle recording.
-
-`AppStatus.hasDeepgramKey` already tells the UI whether a key is set.
+**Voice mode** (`renderer/src/voice/voiceMode.ts`) is one switch for the whole window: on, replies are
+read aloud. The visual island has its own voice switch and reads each step in time with the animation.

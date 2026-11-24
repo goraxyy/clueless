@@ -1,0 +1,65 @@
+# Builds the installers when a version tag is pushed (git tag v0.2.0 && git push origin v0.2.0) and
+# uploads them to a draft GitHub Release. Check the draft, then publish it: installed copies of
+# Clueless update themselves from published releases.
+#
+# Secrets (Settings → Secrets and variables → Actions). Without them the builds are unsigned, which
+# macOS Gatekeeper and Windows SmartScreen warn about, and macOS can't update itself.
+#   macOS:   MAC_CERT_P12_BASE64, MAC_CERT_PASSWORD   (a "Developer ID Application" certificate)
+#            APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID   (notarizing)
+#   Windows: WIN_CERT_P12_BASE64, WIN_CERT_PASSWORD   (a code-signing certificate)
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write # upload to the release
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: --mac
+            platform: mac
+          - os: windows-latest
+            target: --win
+            platform: win
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - run: npm ci
+
+      # The tests run on macOS, where they're kept passing.
+      - run: npm test
+        if: matrix.platform == 'mac'
+
+      - name: Build and upload
+        run: npx electron-vite build && npx electron-builder ${{ matrix.target }} --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # electron-builder reads these; empty ones are ignored, giving an unsigned build
+          # Each platform gets only its own certificate. (a && b || c would fall through to the Windows
+          # certificate on macOS when the Mac one is missing, so the lookups are written per platform.)
+          CSC_LINK: ${{ matrix.platform == 'mac' && secrets.MAC_CERT_P12_BASE64 || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.platform == 'mac' && secrets.MAC_CERT_PASSWORD || '' }}
+          WIN_CSC_LINK: ${{ matrix.platform == 'win' && secrets.WIN_CERT_P12_BASE64 || '' }}
+          WIN_CSC_KEY_PASSWORD: ${{ matrix.platform == 'win' && secrets.WIN_CERT_PASSWORD || '' }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false

@@ -7,6 +7,7 @@
 import {
   app,
   BrowserWindow,
+  desktopCapturer,
   globalShortcut,
   ipcMain,
   Menu,
@@ -17,13 +18,18 @@ import {
   type NativeImage,
   type Rectangle
 } from 'electron'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import {
   IPC,
   ISLAND_IPC,
+  type AppSettings,
   type AppStatus,
   type CodeSpot,
+  type FlashcardInput,
+  type PermissionKind,
+  type PermissionsState,
   type IslandView,
   type InputKind,
   type Rect,
@@ -45,6 +51,8 @@ import {
   toModelImage,
   windowTitles
 } from './capture/capture'
+import { Account, serverConfig } from './account/account'
+import { fileBox } from './account/box'
 import { loadEnvFiles } from './env'
 import { SelectionWatcher, type Point } from './island/selection'
 import { grayFromBitmap, spotFromSelection } from './island/spot'
@@ -53,14 +61,16 @@ import { PythonRunner, toCodeTrace } from './run/python'
 import { MemoryStore } from './memory/store'
 import { SessionController } from './session'
 import { StuckDetector } from './stuck/detector'
-import { createTransport, providerInfo } from './tutor/provider'
+import { createTransport, providerInfo, type Hosted } from './tutor/provider'
 import { Tutor, type ImageInput } from './tutor/tutor'
 import { VoiceManager, type SocketLike } from './voice/deepgram'
 import { ElevenLabs } from './voice/elevenlabs'
+import { keepUpdated } from './updates'
 import { createTray } from './windows/tray'
 import {
   createAskButton,
   createIsland,
+  createMainWindow,
   createOverlay,
   createStage,
   createVisualIsland,
@@ -111,27 +121,155 @@ function loadKeys(): void {
   loadEnvFiles([join(process.cwd(), '.env'), join(app.getAppPath(), '.env'), userEnvFile()])
 }
 
+/** Signed in to Clueless, when this build has a server (set in setup()). */
+let account: Account | null = null
+
+/** The Clueless server, while signed in: Claude goes through it when there's no key in .env. */
+function hosted(): Hosted | null {
+  const a = account
+  return a?.state().signedIn ? { baseURL: a.apiBase, token: () => a.token() } : null
+}
+
+/** A short-lived Deepgram token for one recording, from the Clueless server. */
+async function fetchSttToken(server: Hosted): Promise<{ token: string } | { error: string }> {
+  const token = await server.token()
+  if (!token) return { error: 'Sign in to Clueless first.' }
+  const res = await fetch(`${server.baseURL}/voice/stt-token`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(8000)
+  })
+  const body = (await res.json().catch(() => ({}))) as { token?: string; error?: { message?: string } }
+  return res.ok && body.token ? { token: body.token } : { error: body.error?.message ?? "Couldn't start talking. Try again." }
+}
+
 function status(): AppStatus {
-  const ai = providerInfo()
+  const ai = providerInfo(process.env, hosted())
   return {
     platform: process.platform,
     provider: ai?.provider ?? null,
     model: ai?.model ?? null,
     region: ai?.region ?? null,
-    hasDeepgramKey: Boolean(process.env.DEEPGRAM_API_KEY),
+    hasDeepgramKey: Boolean(process.env.DEEPGRAM_API_KEY) || Boolean(hosted()),
     screenAccess: screenAccess(),
     hotkeys: HOTKEYS,
     hotkeyErrors,
-    envFile: app.isPackaged ? userEnvFile() : join(process.cwd(), '.env')
+    envFile: app.isPackaged ? userEnvFile() : join(process.cwd(), '.env'),
+    account: account?.state() ?? { configured: false, signedIn: false, email: null }
   }
 }
 
+/** To the panel, and to the main window while it's open. */
 function toUi(channel: string, payload: unknown): void {
-  if (overlay && !overlay.isDestroyed()) overlay.webContents.send(channel, payload)
+  for (const w of [overlay, mainWindow]) if (w && !w.isDestroyed()) w.webContents.send(channel, payload)
+}
+
+// ---------- the main window ----------
+
+let mainWindow: BrowserWindow | null = null
+
+/**
+ * Open (or bring forward) the main window. On macOS Clueless normally has no Dock icon, which is
+ * what lets the panel float over full-screen apps; the Dock icon shows while the main window is
+ * open and goes away when it closes.
+ */
+function openMain(): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+    return
+  }
+  if (process.platform === 'darwin') void app.dock?.show()
+  mainWindow = createMainWindow()
+  mainWindow.on('closed', () => {
+    mainWindow = null
+    if (process.platform === 'darwin') {
+      app.dock?.hide()
+      // Hiding the Dock icon changes how macOS treats the app: re-join every Space, full-screen ones too.
+      setTimeout(() => overlay?.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true }), 300)
+    }
+  })
+}
+
+/** Read the screen from the main window. Clueless's own windows (this one included) are hidden
+ *  while the screen is captured, so the problem behind it is what gets read. */
+async function askFromMain(kind: 'screen' | 'area'): Promise<void> {
+  await ask(kind)
+}
+
+// ---------- settings ----------
+
+const settingsFile = (): string => join(app.getPath('userData'), 'clueless-settings.json')
+
+function loadSettings(): AppSettings {
+  let saved: Partial<AppSettings> = {}
+  try {
+    saved = JSON.parse(readFileSync(settingsFile(), 'utf8')) as Partial<AppSettings>
+  } catch {
+    // first run
+  }
+  return {
+    openAtLogin: app.getLoginItemSettings().openAtLogin,
+    openMainOnLaunch: saved.openMainOnLaunch ?? true,
+    setupDone: saved.setupDone ?? false
+  }
+}
+
+function saveSettings(patch: unknown): AppSettings {
+  const next = loadSettings()
+  if (patch && typeof patch === 'object') {
+    const p = patch as Partial<Record<keyof AppSettings, unknown>>
+    if (typeof p.openMainOnLaunch === 'boolean') next.openMainOnLaunch = p.openMainOnLaunch
+    if (typeof p.setupDone === 'boolean') next.setupDone = p.setupDone
+    if (typeof p.openAtLogin === 'boolean' && app.isPackaged) {
+      // Started at login: straight to the menu bar, no main window.
+      app.setLoginItemSettings({ openAtLogin: p.openAtLogin, args: ['--hidden'] })
+      next.openAtLogin = p.openAtLogin
+    }
+  }
+  writeFileSync(settingsFile(), JSON.stringify({ openMainOnLaunch: next.openMainOnLaunch, setupDone: next.setupDone }, null, 2))
+  return next
+}
+
+// ---------- permissions ----------
+
+function permissions(): PermissionsState {
+  const mac = process.platform === 'darwin'
+  const mic = mac ? systemPreferences.getMediaAccessStatus('microphone') : 'granted'
+  return {
+    screen: screenAccess(),
+    microphone: mic === 'granted' || mic === 'denied' || mic === 'not-determined' || mic === 'restricted' ? mic : 'unknown',
+    accessibility: mac ? systemPreferences.isTrustedAccessibilityClient(false) : true
+  }
+}
+
+const PRIVACY_PANES: Record<PermissionKind, string> = {
+  screen: 'Privacy_ScreenCapture',
+  microphone: 'Privacy_Microphone',
+  accessibility: 'Privacy_Accessibility'
+}
+
+/** Ask macOS for a permission. The first time it shows its own prompt; after a "no" it can only be
+ *  turned on in System Settings, so that page opens. */
+async function requestPermission(kind: unknown): Promise<PermissionsState> {
+  if (process.platform !== 'darwin' || (kind !== 'screen' && kind !== 'microphone' && kind !== 'accessibility')) return permissions()
+  const now = permissions()
+  if (kind === 'microphone' && now.microphone === 'not-determined') {
+    await systemPreferences.askForMediaAccess('microphone')
+  } else if (kind === 'accessibility' && !now.accessibility) {
+    systemPreferences.isTrustedAccessibilityClient(true) // macOS's prompt, with a button to the settings
+  } else if (kind === 'screen' && now.screen === 'not-determined') {
+    // Asking to capture is what makes macOS list (and prompt for) Clueless.
+    await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 } }).catch(() => [])
+  } else {
+    void shell.openExternal(`x-apple.systempreferences:com.apple.preference.security?${PRIVACY_PANES[kind]}`)
+  }
+  return permissions()
 }
 
 function makeTutor(): Tutor | null {
-  const transport = createTransport() // Claude API or Bedrock, from the env
+  const transport = createTransport(process.env, 'tutor', hosted()) // keys in .env, or the Clueless server
   return transport ? new Tutor(transport, log) : null
 }
 
@@ -150,7 +288,8 @@ function toggleOverlay(): void {
 
 /** Clueless's own windows that are on screen right now. */
 function ownVisibleWindows(): BrowserWindow[] {
-  return [overlay, stage, island, askButton, visual].filter((w): w is BrowserWindow => Boolean(w && !w.isDestroyed() && w.isVisible()))
+  // The main window too: it would otherwise be what gets read.
+  return [overlay, stage, island, askButton, visual, mainWindow].filter((w): w is BrowserWindow => Boolean(w && !w.isDestroyed() && w.isVisible()))
 }
 
 /** Hide Clueless's own windows (without losing their place) while the screen is captured. */
@@ -314,8 +453,8 @@ function pythonRunner(): PythonRunner {
 const islandController = new IslandController({
   makeTracer: () => {
     loadKeys() // pick up a key added since launch
-    const tutor = createTransport(process.env, 'tutor')
-    const fast = createTransport(process.env, 'fast')
+    const tutor = createTransport(process.env, 'tutor', hosted())
+    const fast = createTransport(process.env, 'fast', hosted())
     return tutor && fast ? new Tracer({ tutor, fast }, pythonRunner(), log) : null
   },
   capture: captureForIsland,
@@ -523,7 +662,49 @@ function setup(): void {
       process.platform === 'darwin' ? [{ role: 'appMenu' }, { role: 'editMenu' }] : [{ role: 'editMenu' }]
     )
   )
-  const store = new MemoryStore(join(app.getPath('userData'), 'clueless-memory.json'))
+  const store = new MemoryStore(join(app.getPath('userData'), 'clueless-memory.json'), () => toUi(IPC.memoryChanged, null))
+
+  // The main window: history, flashcards, setup and settings.
+  const str = (v: unknown): string | null => (typeof v === 'string' && v.length <= 200 ? v : null)
+  ipcMain.on(IPC.openMain, () => openMain())
+  ipcMain.on(IPC.showPanel, () => showOverlay())
+  ipcMain.on(IPC.askFromMain, (_e, mode: unknown) => void askFromMain(mode === 'area' ? 'area' : 'screen'))
+  ipcMain.handle(IPC.historyList, () => store.sessions())
+  ipcMain.handle(IPC.historyGet, (_e, id: unknown) => (str(id) ? store.session(str(id)!) : null))
+  ipcMain.handle(IPC.historyDelete, (_e, id: unknown) => {
+    if (str(id)) store.deleteSession(str(id)!)
+  })
+  ipcMain.handle(IPC.cardsList, () => store.cards())
+  ipcMain.handle(IPC.cardsAdd, (_e, card: unknown) => (card && typeof card === 'object' ? store.addCard(card as FlashcardInput) : null))
+  ipcMain.handle(IPC.cardsUpdate, (_e, arg: { id?: unknown; patch?: unknown }) => {
+    if (str(arg?.id) && arg.patch && typeof arg.patch === 'object') store.updateCard(str(arg.id)!, arg.patch as Record<string, unknown>)
+  })
+  ipcMain.handle(IPC.cardsDelete, (_e, id: unknown) => {
+    if (str(id)) store.deleteCard(str(id)!)
+  })
+  ipcMain.handle(IPC.cardsReview, (_e, arg: { id?: unknown; knew?: unknown }) => {
+    if (str(arg?.id) && typeof arg.knew === 'boolean') store.reviewCard(str(arg.id)!, arg.knew)
+  })
+  ipcMain.handle(IPC.permissions, () => permissions())
+  ipcMain.handle(IPC.requestPermission, (_e, kind: unknown) => requestPermission(kind))
+  ipcMain.handle(IPC.getSettings, () => loadSettings())
+  ipcMain.handle(IPC.setSettings, (_e, patch: unknown) => saveSettings(patch))
+  ipcMain.on(IPC.openExternal, (_e, url: unknown) => {
+    if (typeof url === 'string' && /^https:\/\/[^\s]+$/.test(url) && url.length < 2000) void shell.openExternal(url)
+  })
+
+  // The server is set in the env (CLUELESS_SUPABASE_URL / _KEY) or baked in at build time from
+  // MAIN_VITE_SUPABASE_URL / MAIN_VITE_SUPABASE_KEY in app/.env.
+  const server = serverConfig(process.env, { url: import.meta.env.MAIN_VITE_SUPABASE_URL, key: import.meta.env.MAIN_VITE_SUPABASE_KEY })
+  if (server) {
+    account = new Account(server, fileBox(join(app.getPath('userData'), 'clueless-account.bin')), () => toUi(IPC.status, status()))
+    void account.whenReady().then(() => toUi(IPC.status, status()))
+  }
+  const noServer = { ok: false as const, message: 'This build of Clueless has no server to sign in to.' }
+  ipcMain.handle(IPC.accountSendCode, (_e, email: unknown) => account?.sendCode(email) ?? noServer)
+  ipcMain.handle(IPC.accountVerify, (_e, arg: { email?: unknown; code?: unknown }) => account?.verifyCode(arg?.email, arg?.code) ?? noServer)
+  ipcMain.handle(IPC.accountSignOut, () => account?.signOut())
+  ipcMain.handle(IPC.accountUsage, () => account?.usage() ?? null)
 
   stuck = new StuckDetector({
     thumbnail: () => grayThumbnail(activeDisplay()),
@@ -548,6 +729,10 @@ function setup(): void {
       loadKeys() // pick up a key added since launch
       return process.env.DEEPGRAM_API_KEY?.trim() || undefined
     },
+    serverToken: () => {
+      const server = hosted()
+      return server ? fetchSttToken(server) : null
+    },
     events: {
       transcript: (t) => toUi(IPC.voiceTranscript, t),
       state: (e) => toUi(IPC.voiceState, e)
@@ -560,12 +745,16 @@ function setup(): void {
   ipcMain.handle(IPC.getSession, () => controller.current)
   ipcMain.handle(IPC.getMemory, () => store.view())
   ipcMain.on(IPC.ask, (_e, mode: 'screen' | 'area') => void ask(mode === 'area' ? 'area' : 'screen'))
-  ipcMain.on(IPC.askText, (_e, text: string) => {
+  ipcMain.on(IPC.askText, (e, text: string) => {
     if (typeof text !== 'string' || !text.trim()) return
+    // Typed in the main window: the screen would only show Clueless, so the text goes alone.
+    if (mainWindow && e.sender === mainWindow.webContents) return void controller.startProblem({ text: text.slice(0, 8000) })
     void askWithText(text.slice(0, 8000))
   })
-  ipcMain.on(IPC.send, (_e, arg: { text: string; as: InputKind }) => {
+  ipcMain.on(IPC.send, (e, arg: { text: string; as: InputKind }) => {
     if (typeof arg?.text !== 'string') return
+    // From the main window the screen would just show Clueless itself: send the text alone.
+    if (mainWindow && e.sender === mainWindow.webContents) return void controller.send(arg.text.slice(0, 4000), arg.as, null)
     // A typed message can be about anything on screen, so the screen goes with it.
     void screenNow().then((image) => controller.send(arg.text.slice(0, 4000), arg.as, image))
   })
@@ -647,7 +836,8 @@ function setup(): void {
       return process.env
     },
     fetch,
-    log
+    log,
+    hosted
   )
   ipcMain.handle(IPC.voiceTts, (_e, req: unknown) => elevenLabs.speak(req))
   ipcMain.on(IPC.voiceStart, (_e, id: unknown) => voice.start(id))
@@ -677,6 +867,7 @@ function setup(): void {
   visual.on('move', () => sendStage()) // the arrow from the code follows it
 
   keepAlive.push(createTray({
+    openMain,
     ask: () => void ask('screen'),
     selectArea: () => void ask('area'),
     toggle: toggleOverlay,
@@ -729,7 +920,12 @@ function setup(): void {
   overlay.once('ready-to-show', () =>
     setTimeout(() => {
       overlay?.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
-      showOverlay()
+      // Opened from Finder: the main window (first run: setup). Started at login, or the student
+      // turned it off: just the panel, from the menu bar.
+      const settings = loadSettings()
+      const atLogin = process.argv.includes('--hidden') || app.getLoginItemSettings().wasOpenedAtLogin
+      if (!SMOKE && !atLogin && (settings.openMainOnLaunch || !settings.setupDone)) openMain()
+      else showOverlay()
     }, 800)
   )
   for (const [name, accelerator] of Object.entries(HOTKEYS)) {
@@ -738,11 +934,13 @@ function setup(): void {
   }
   const voiceOk = globalShortcut.register(VOICE_HOTKEY, () => {
     showOverlay()
-    toUi(IPC.voiceToggle, null)
+    // The panel only: the main window must not start a recording of its own.
+    if (overlay && !overlay.isDestroyed()) overlay.webContents.send(IPC.voiceToggle, null)
   })
   if (!voiceOk) hotkeyErrors.push(`${VOICE_HOTKEY} is taken by another app`)
   if (!globalShortcut.register(ISLAND_HOTKEY, toggleIsland)) hotkeyErrors.push(`${ISLAND_HOTKEY} is taken by another app`)
   watchHighlights()
+  if (!SMOKE) keepUpdated(log)
   log(`ready. Ask: ${HOTKEYS.ask}  Select area: ${HOTKEYS.area}  Voice: ${VOICE_HOTKEY}  Island: ${ISLAND_HOTKEY}`)
 }
 
@@ -752,9 +950,11 @@ if (SMOKE) app.setPath('userData', join(tmpdir(), `clueless-smoke-${process.pid}
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
-  app.on('second-instance', () => showOverlay())
+  // Opened again from Finder or the Dock: show the main window.
+  app.on('second-instance', () => openMain())
   app.whenReady().then(setup)
-  app.on('activate', () => showOverlay())
+  app.on('activate', () => openMain())
+  app.on('before-quit', () => controller?.saveNow()) // an unfinished problem still goes into History
   app.on('window-all-closed', () => app.quit())
   app.on('will-quit', () => {
     globalShortcut.unregisterAll()

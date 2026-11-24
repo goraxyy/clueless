@@ -27,12 +27,23 @@ Works with code, math, physics and most other problem sets, on **macOS and Windo
 ## What it does
 
 ### The panel: your tutor, one step at a time
-- **Hints that grow slowly.** Each hint is a little more specific than the last.
+- **Asks what's tripping you up**, with 3 options to pick from.
+- **Hint, What next?, Check my work and Example** (a similar problem with different numbers). Each
+  hint is a little more specific than the last.
+- **One box for answers and questions.** It sees your screen with every message.
 - **Checks your math.** Math and physics answers are checked by a math engine, so a right answer is
   never marked wrong by a slip.
-- **Animates ideas.** It can animate your code or the idea behind a question.
+- **Animates ideas.** The play button by the mic animates the idea at your step, with a voice.
 - **Talks.** Answer out loud and hear the replies, like a real conversation.
 - **Ends with a short recap** of what you learned and where you got stuck.
+
+### The main window
+Opens from Finder, the Dock or the menu bar:
+- **Chat:** the same problem as the panel, shown in full.
+- **History:** every problem, with its whole conversation.
+- **Flashcards:** save any reply with its card button, then review by topic.
+- **Profile:** your plan and this month's use.
+- **Settings**, and first-run setup: sign in, then permissions.
 
 ### The small window
 Shrink the panel to a compact bar. From there you can type a question, talk with the mic, turn
@@ -52,8 +63,11 @@ Highlight anything on your screen and pick a button that appears next to the cur
 
 ## Quick start
 
-**You need:** [Node.js](https://nodejs.org) (LTS), and access to Claude through **Amazon Bedrock**
-or a **Claude API key**.
+**You need:** [Node.js](https://nodejs.org) (LTS), and one of these:
+- **Sign in to Clueless.** The app sends Claude requests through the Clueless server, which holds
+  the keys and keeps each student within their monthly plan. Set it up with
+  [supabase/README.md](supabase/README.md). No Claude key on your computer.
+- **Your own Claude access**, through **Amazon Bedrock** or a **Claude API key**, as below.
 
 ```bash
 cd app
@@ -69,7 +83,7 @@ Pick **one** way to reach Claude:
 
 | Option | Set |
 |---|---|
-| **Amazon Bedrock** | `AWS_REGION` and `AWS_BEARER_TOKEN_BEDROCK` (or `AWS_PROFILE`). Turn on access to **Claude Sonnet 5.5** and **Haiku 5.5** in the Bedrock console. |
+| **Amazon Bedrock** | `AWS_REGION` and `AWS_BEARER_TOKEN_BEDROCK` (or `AWS_PROFILE`). Turn on access to **Claude Sonnet 5.5** and **Haiku 5.5** in the Bedrock console. If your account doesn't have them yet, set `CLUELESS_MODEL=anthropic.claude-sonnet-5` and `CLUELESS_FAST_MODEL=anthropic.claude-haiku-4-5`. |
 | **Claude API** | `ANTHROPIC_API_KEY` |
 
 Optional extras:

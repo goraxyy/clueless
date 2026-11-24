@@ -37,7 +37,28 @@ const api: CluelessApi = {
   onVoiceState: (cb) => listen(IPC.voiceState, cb),
   onVoiceToggle: (cb) => listen(IPC.voiceToggle, cb),
   tts: (req) => ipcRenderer.invoke(IPC.voiceTts, req),
-  onStageIsland: (cb) => listen(IPC.stageIsland, cb)
+  sendCode: (email) => ipcRenderer.invoke(IPC.accountSendCode, email),
+  verifyCode: (email, code) => ipcRenderer.invoke(IPC.accountVerify, { email, code }),
+  signOut: () => ipcRenderer.invoke(IPC.accountSignOut),
+  getUsage: () => ipcRenderer.invoke(IPC.accountUsage),
+  onStageIsland: (cb) => listen(IPC.stageIsland, cb),
+  openMain: () => ipcRenderer.send(IPC.openMain),
+  showPanel: () => ipcRenderer.send(IPC.showPanel),
+  askFromMain: (mode) => ipcRenderer.send(IPC.askFromMain, mode),
+  onMemoryChanged: (cb) => listen(IPC.memoryChanged, cb),
+  listHistory: () => ipcRenderer.invoke(IPC.historyList),
+  getHistory: (id) => ipcRenderer.invoke(IPC.historyGet, id),
+  deleteHistory: (id) => ipcRenderer.invoke(IPC.historyDelete, id),
+  listCards: () => ipcRenderer.invoke(IPC.cardsList),
+  addCard: (card) => ipcRenderer.invoke(IPC.cardsAdd, card),
+  updateCard: (id, patch) => ipcRenderer.invoke(IPC.cardsUpdate, { id, patch }),
+  deleteCard: (id) => ipcRenderer.invoke(IPC.cardsDelete, id),
+  reviewCard: (id, knew) => ipcRenderer.invoke(IPC.cardsReview, { id, knew }),
+  getPermissions: () => ipcRenderer.invoke(IPC.permissions),
+  requestPermission: (kind) => ipcRenderer.invoke(IPC.requestPermission, kind),
+  getSettings: () => ipcRenderer.invoke(IPC.getSettings),
+  setSettings: (patch) => ipcRenderer.invoke(IPC.setSettings, patch),
+  openExternal: (url) => ipcRenderer.send(IPC.openExternal, url)
 }
 
 contextBridge.exposeInMainWorld('clueless', api)

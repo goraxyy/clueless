@@ -1,0 +1,261 @@
+/* The Clueless website: one stylesheet, no build step. */
+:root {
+  --orange: #d97757;
+  --orange-dark: #c4623f;
+  --orange-soft: #fbf2ee;
+  --ink: #18181b;
+  --muted: #71717a;
+  --line: #e4e4e7;
+  --bg: #fafafa;
+  --card: #ffffff;
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #f4f4f5;
+    --muted: #a1a1aa;
+    --line: #27272a;
+    --bg: #18181b;
+    --card: #1f1f23;
+    --orange-soft: #2a1d18;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  line-height: 1.6;
+}
+a {
+  color: var(--orange-dark);
+}
+.wrap {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+header.top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 0;
+}
+.logo {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: linear-gradient(#de8a6d, var(--orange));
+  color: white;
+  display: grid;
+  place-items: center;
+}
+.brand {
+  font-weight: 650;
+  font-size: 18px;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  text-decoration: none;
+}
+header.top nav {
+  margin-left: auto;
+  display: flex;
+  gap: 20px;
+  font-size: 14.5px;
+}
+header.top nav a {
+  color: var(--muted);
+  text-decoration: none;
+}
+header.top nav a:hover {
+  color: var(--ink);
+}
+
+.hero {
+  text-align: center;
+  padding: 72px 0 56px;
+}
+.hero h1 {
+  font-size: clamp(34px, 6vw, 56px);
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+  margin: 0 auto 18px;
+  max-width: 760px;
+}
+.hero p.lead {
+  font-size: 19px;
+  color: var(--muted);
+  max-width: 620px;
+  margin: 0 auto 30px;
+}
+.buttons {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 15px;
+  text-decoration: none;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  background: var(--card);
+}
+.btn.primary {
+  background: var(--orange);
+  border-color: var(--orange);
+  color: white;
+}
+.btn.primary:hover {
+  background: var(--orange-dark);
+}
+.small {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 14px;
+}
+
+section {
+  padding: 56px 0;
+}
+section h2 {
+  font-size: 30px;
+  letter-spacing: -0.02em;
+  margin: 0 0 8px;
+  text-align: center;
+}
+section p.sub {
+  text-align: center;
+  color: var(--muted);
+  margin: 0 auto 36px;
+  max-width: 560px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 22px;
+}
+.card h3 {
+  margin: 0 0 6px;
+  font-size: 16.5px;
+}
+.card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14.5px;
+}
+kbd {
+  font-family: inherit;
+  font-size: 12.5px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 1px 6px;
+  background: var(--bg);
+}
+
+.chat {
+  max-width: 620px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.bubble {
+  padding: 12px 16px;
+  border-radius: 16px;
+  font-size: 15px;
+  max-width: 85%;
+}
+.bubble.you {
+  align-self: flex-end;
+  background: var(--orange);
+  color: white;
+}
+.bubble.clueless {
+  align-self: flex-start;
+  background: var(--card);
+  border: 1px solid var(--line);
+}
+
+.plans {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  max-width: 760px;
+  margin: 0 auto;
+}
+.plan {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 28px;
+}
+.plan.pro {
+  border-color: var(--orange);
+  box-shadow: 0 0 0 3px var(--orange-soft);
+}
+.price {
+  font-size: 40px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.price span {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.plan ul {
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 14.5px;
+}
+
+footer {
+  border-top: 1px solid var(--line);
+  padding: 28px 0 40px;
+  color: var(--muted);
+  font-size: 13.5px;
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+footer a {
+  color: var(--muted);
+}
+
+/* the privacy page */
+.doc {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 32px 0 64px;
+}
+.doc h1 {
+  letter-spacing: -0.02em;
+}
+.doc h2 {
+  text-align: left;
+  font-size: 20px;
+  margin-top: 32px;
+}
+.doc li {
+  margin-bottom: 6px;
+}

@@ -12,9 +12,26 @@ files:
 asarUnpack:
   - '**/node_modules/uiohook-napi/**' # native mouse hook (noticing highlights)
   - '**/node_modules/pyodide/**' # Python for code runs: it reads its own files and runs in a worker
+# Signing and notarizing come from the environment, so unsigned local builds still work:
+#   macOS signing: a "Developer ID Application" certificate in the keychain, or CSC_LINK + CSC_KEY_PASSWORD
+#   macOS notarizing: APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID (or the APPLE_API_KEY trio)
+#   Windows signing: WIN_CSC_LINK + WIN_CSC_KEY_PASSWORD, or Azure Trusted Signing (see .github/workflows/release.yml)
+# Builds go to GitHub Releases; the installed app updates itself from there (electron-updater).
+publish:
+  provider: github
+  owner: goraxyy
+  repo: clueless
 mac:
-  target: dmg
+  # dmg to install, zip for updates (macOS updates download the zip)
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
   category: public.app-category.education
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
     NSMicrophoneUsageDescription: Clueless listens only while you hold the talk button.
     NSScreenCaptureUsageDescription: Clueless reads your screen only when you press the hotkey.

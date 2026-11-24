@@ -10,6 +10,7 @@ import { VisualIsland } from './island/VisualIsland'
 import { AreaSelector } from './screens/AreaSelector'
 import { Banners, CompactBar, EmptyState, GLASS_ALPHA, Header, SettingsMenu, type Glass } from './screens/Home'
 import { GapsScreen } from './screens/Gaps'
+import { MainApp } from './main/MainApp'
 import { SessionScreen } from './screens/Session'
 import { VoiceStrip } from './components/MicButton'
 import { useVoiceConversation } from './voice/useVoiceConversation'
@@ -18,6 +19,7 @@ import { speech } from './voice/speaker'
 import { toSpeech } from '../../shared/speechText'
 
 // One renderer, several windows, picked by the URL hash:
+//   #main    the main window: chat, history, flashcards, profile, settings
 //   (none)   the tutor panel           #select  drag a box around the problem
 //   #stage   drawn over the student's screen (the tutor's code animations, Animate's line highlight)
 //   #island  the island's pill         #ask     the Ask / Animate buttons next to the cursor
@@ -25,6 +27,13 @@ import { toSpeech } from '../../shared/speechText'
 export function App() {
   const hash = window.location.hash
   if (hash === '#select') return <AreaSelector />
+  if (hash === '#main') {
+    return (
+      <MotionConfig reducedMotion="user">
+        <MainApp />
+      </MotionConfig>
+    )
+  }
   if (hash === '#ask') {
     return (
       <div className="flex h-full items-start p-1.5">
@@ -223,7 +232,7 @@ function Overlay() {
           />
         )}
         {menu && !compact && (
-          <SettingsMenu glass={glass} onGlass={changeGlass} onNewSession={newSession} onClose={() => setMenu(false)} overContent />
+          <SettingsMenu glass={glass} onGlass={changeGlass} onNewSession={newSession} onClose={() => setMenu(false)} overContent account={status?.account} />
         )}
         {!compact && (
           <>
@@ -250,7 +259,7 @@ function Overlay() {
       </div>
       {/* The small window keeps its shape: settings slide down as a card of their own under it. */}
       {menu && compact && (
-        <SettingsMenu glass={glass} onGlass={changeGlass} onNewSession={newSession} onClose={() => setMenu(false)} overContent={false} />
+        <SettingsMenu glass={glass} onGlass={changeGlass} onNewSession={newSession} onClose={() => setMenu(false)} overContent={false} account={status?.account} />
       )}
       </div>
       {!compact && <ResizeGrips panel={panel} size={size} onSize={changeSize} />}

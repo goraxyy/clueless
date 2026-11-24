@@ -118,3 +118,46 @@ describe('chooseVoice', () => {
     expect(chooseVoice([], '')).toBeNull()
   })
 })
+
+describe('ElevenLabs through the Clueless server (no key)', () => {
+  const server = { baseURL: 'https://x.supabase.co/functions/v1/api', token: async () => 'jwt-1' }
+
+  it('sends the same calls to the server with the access token, and no ElevenLabs key', async () => {
+    const { http, calls } = fakeFetch(({ url }) => (url.includes('/v2/voices') ? voices(['Talia']) : mp3()))
+    const el = new ElevenLabs(() => ({}), http, () => {}, () => server)
+    expect(await el.speak({ text: 'Hi' })).toMatchObject({ ok: true })
+    expect(calls.map((c) => c.url.split('?')[0])).toEqual([
+      'https://x.supabase.co/functions/v1/api/elevenlabs/v2/voices',
+      'https://x.supabase.co/functions/v1/api/elevenlabs/v1/text-to-speech/id0'
+    ])
+    for (const c of calls) {
+      const h = c.init?.headers as Record<string, string>
+      expect(h.authorization).toBe('Bearer jwt-1')
+      expect(h['xi-api-key']).toBeUndefined()
+    }
+  })
+
+  it("shows the server's message when the month's use is up", async () => {
+    const limit = JSON.stringify({ type: 'error', error: { type: 'billing_error', message: "You've used this month's Clueless." } })
+    const { http } = fakeFetch(({ url }) => (url.includes('/v2/voices') ? voices(['Talia']) : new Response(limit, { status: 402 })))
+    const el = new ElevenLabs(() => ({}), http, () => {}, () => server)
+    expect(await el.speak({ text: 'Hi' })).toEqual({ ok: false, reason: 'error', message: "You've used this month's Clueless." })
+  })
+
+  it('a key in .env still wins', async () => {
+    const { http, calls } = fakeFetch(({ url }) => (url.includes('/v2/voices') ? voices(['Talia']) : mp3()))
+    const el = new ElevenLabs(() => ({ ELEVENLABS_API_KEY: 'k1' }), http, () => {}, () => server)
+    await el.speak({ text: 'Hi' })
+    expect(calls[0].url.startsWith('https://api.elevenlabs.io')).toBe(true)
+  })
+})
+
+describe('ElevenLabs when the Clueless server has no ElevenLabs key', () => {
+  it("falls back to the computer's voice instead of showing an error", async () => {
+    const off = JSON.stringify({ type: 'error', error: { type: 'api_error', message: 'Spoken replies are not set up on this server.' } })
+    const { http } = fakeFetch(() => new Response(off, { status: 503 }))
+    const server = { baseURL: 'https://x.supabase.co/functions/v1/api', token: async () => 'jwt-1' }
+    const el = new ElevenLabs(() => ({}), http, () => {}, () => server)
+    expect(await el.speak({ text: 'Hi' })).toMatchObject({ ok: false, reason: 'no-key' })
+  })
+})
